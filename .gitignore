@@ -10,3 +10,4 @@ node_modules/
 .claude-teardown-backup-*
 
 .DS_Store
+.writetest
