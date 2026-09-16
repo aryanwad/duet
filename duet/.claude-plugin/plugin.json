@@ -1,0 +1,17 @@
+{
+  "name": "duet",
+  "version": "0.1.0",
+  "description": "Opus orchestrates, Astra audits. A shared context bundle is handed identically to both, so GPT-6 Astra can check Claude's plan and its delegation decisions — not just its diffs. Tickets route across families to Sonnet subagents or GPT-5.6 Sol workers, with cross-family review enforced and a rolling quota guard for subscription billing.",
+  "author": {
+    "name": "ryan"
+  },
+  "license": "MIT",
+  "keywords": [
+    "orchestration",
+    "codex",
+    "adversarial-review",
+    "multi-model",
+    "subagents",
+    "routing"
+  ]
+}

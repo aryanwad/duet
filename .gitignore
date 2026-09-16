@@ -1,0 +1,12 @@
+# Per-project duet state lives in the repo being worked on, not here.
+.duet/
+
+node_modules/
+*.log
+
+# Backups left by teardown.sh / clean-claude-md.sh
+*.backup
+*.backup.*
+.claude-teardown-backup-*
+
+.DS_Store

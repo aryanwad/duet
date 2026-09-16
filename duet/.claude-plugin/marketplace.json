@@ -1,0 +1,13 @@
+{
+  "name": "duet-local",
+  "owner": {
+    "name": "ryan"
+  },
+  "plugins": [
+    {
+      "name": "duet",
+      "source": "./",
+      "description": "Opus orchestrates, Astra audits, workers span both families."
+    }
+  ]
+}

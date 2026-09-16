@@ -1,0 +1,17 @@
+{
+  "name": "duet",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "Cross-family orchestration and audit gate for Claude Code.",
+  "bin": {
+    "duet": "./bin/duet.js"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=2 \"test/*.test.js\""
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "MIT"
+}
