@@ -1,0 +1,951 @@
+<title>Duet Cycle Board</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+  /* ---- tokens: complete light palette on bare :root ------------------- */
+  :root {
+    --bg:          #ecedf1;
+    --surface:     #ffffff;
+    --surface-2:   #f4f5f8;
+    --sunk:        #e4e6ec;
+    --ink:         #171c24;
+    --ink-2:       #4b5563;
+    --ink-3:       #79818f;
+    --line:        #d7dbe3;
+    --line-strong: #b9c0cb;
+
+    --clay:  #9d4a27;   /* anthropic side */
+    --teal:  #0c6a6a;   /* openai side */
+    --red:   #ab2129;
+    --amber: #8a5d04;
+    --green: #1b6342;
+
+    --clay-wash:  #f7ede8;
+    --teal-wash:  #e6f1f0;
+    --red-wash:   #fceceb;
+    --amber-wash: #fbf2dd;
+    --green-wash: #e8f2eb;
+
+    --radius: 7px;
+    --shadow: 0 1px 2px rgba(23, 28, 36, .05);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:          #0f1319;
+      --surface:     #171c23;
+      --surface-2:   #1c222b;
+      --sunk:        #121720;
+      --ink:         #e7eaf0;
+      --ink-2:       #a9b2c0;
+      --ink-3:       #757e8c;
+      --line:        #29303a;
+      --line-strong: #3a424f;
+
+      --clay:  #e1906a;
+      --teal:  #4fb9b1;
+      --red:   #f08189;
+      --amber: #d8a83f;
+      --green: #6ac598;
+
+      --clay-wash:  #2a1d16;
+      --teal-wash:  #12262a;
+      --red-wash:   #2c1517;
+      --amber-wash: #29200e;
+      --green-wash: #12271c;
+
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg:          #0f1319;
+    --surface:     #171c23;
+    --surface-2:   #1c222b;
+    --sunk:        #121720;
+    --ink:         #e7eaf0;
+    --ink-2:       #a9b2c0;
+    --ink-3:       #757e8c;
+    --line:        #29303a;
+    --line-strong: #3a424f;
+
+    --clay:  #e1906a;
+    --teal:  #4fb9b1;
+    --red:   #f08189;
+    --amber: #d8a83f;
+    --green: #6ac598;
+
+    --clay-wash:  #2a1d16;
+    --teal-wash:  #12262a;
+    --red-wash:   #2c1517;
+    --amber-wash: #29200e;
+    --green-wash: #12271c;
+
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3);
+  }
+
+  /* ---- base ----------------------------------------------------------- */
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 780px;
+    margin: 0 auto;
+    padding-inline: 16px;
+    padding-block: 0 48px;
+  }
+
+  h1, h2, h3 { margin: 0; text-wrap: balance; font-weight: 600; }
+
+  .mono {
+    font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .label {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  a { color: inherit; }
+
+  /* ---- masthead ------------------------------------------------------- */
+  .masthead {
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .masthead .wrap {
+    padding-block: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .brandrow {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+  }
+
+  .brand b { font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
+
+  .pairing {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    color: var(--ink-3);
+  }
+
+  .pairing .a { color: var(--clay); }
+  .pairing .o { color: var(--teal); }
+
+  /* the one sentence the page exists to deliver */
+  .verdict {
+    font-size: 21px;
+    font-weight: 600;
+    letter-spacing: -.015em;
+    line-height: 1.28;
+  }
+
+  .verdict em { font-style: normal; color: var(--red); }
+  .verdict.calm em { color: var(--green); }
+
+  .verdict-sub {
+    margin-top: 4px;
+    font-size: 13px;
+    color: var(--ink-2);
+  }
+
+  /* ---- quota ---------------------------------------------------------- */
+  .quota {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 10px 22px;
+  }
+
+  .meter-name {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 12px;
+  }
+
+  .meter-name .n { font-family: "IBM Plex Mono", monospace; }
+  .meter-name .v { font-family: "IBM Plex Mono", monospace; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+  .track {
+    margin-top: 5px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--sunk);
+    overflow: hidden;
+  }
+
+  .fill { height: 100%; background: var(--teal); }
+  .fill.anthropic { background: var(--clay); }
+  .fill.hot { background: var(--red); }
+
+  .meter-foot { margin-top: 4px; font-size: 11px; color: var(--ink-3); }
+
+  /* ---- notices -------------------------------------------------------- */
+  .notice {
+    margin-top: 18px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    background: var(--amber-wash);
+    padding: 11px 13px;
+    font-size: 13px;
+    color: var(--ink);
+  }
+
+  .notice b { font-weight: 600; }
+
+  .notice code {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 0 4px;
+    white-space: nowrap;
+  }
+
+  /* ---- filter --------------------------------------------------------- */
+  .toolbar {
+    margin-top: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .segs { display: flex; gap: 0; border: 1px solid var(--line-strong); border-radius: var(--radius); overflow: hidden; }
+
+  .segs button {
+    appearance: none;
+    border: 0;
+    border-left: 1px solid var(--line-strong);
+    background: var(--surface);
+    color: var(--ink-2);
+    font: inherit;
+    font-size: 12.5px;
+    padding: 6px 13px;
+    cursor: pointer;
+  }
+
+  .segs button:first-child { border-left: 0; }
+  .segs button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+  .segs button:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+
+  /* ---- project cards -------------------------------------------------- */
+  .projects {
+    list-style: none;
+    margin: 14px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .card {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .card.is-blocked { border-color: var(--red); }
+
+  .card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 11px 14px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--line);
+    flex-wrap: wrap;
+  }
+
+  .card.is-blocked .card-head { background: var(--red-wash); border-bottom-color: var(--red); }
+  .card.is-ready  .card-head { background: var(--green-wash); }
+
+  .card-head h2 { font-size: 15.5px; }
+
+  .pill {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10.5px;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    padding: 2.5px 7px;
+    border-radius: 3px;
+    border: 1px solid currentColor;
+    white-space: nowrap;
+  }
+
+  .pill.blocked   { color: var(--red); }
+  .pill.attention { color: var(--amber); }
+  .pill.normal    { color: var(--ink-3); }
+  .pill.idle      { color: var(--ink-3); border-style: dashed; }
+
+  .card-body {
+    padding: 13px 14px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  /* waiting line — the operative fact */
+  .waiting {
+    font-size: 14.5px;
+    line-height: 1.45;
+  }
+
+  .waiting strong { font-weight: 600; }
+  .card.is-blocked .waiting strong { color: var(--red); }
+
+  /* phase rail: a real sequence, so it gets a real rail */
+  .rail { display: flex; align-items: flex-start; gap: 0; }
+
+  .stop {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    position: relative;
+    padding-top: 7px;
+  }
+
+  .stop::before {
+    content: "";
+    position: absolute;
+    top: 10px;
+    left: 0;
+    right: 50%;
+    height: 1px;
+    background: var(--line-strong);
+  }
+
+  .stop::after {
+    content: "";
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    right: 0;
+    height: 1px;
+    background: var(--line-strong);
+  }
+
+  .stop:first-child::before,
+  .stop:last-child::after { display: none; }
+
+  .stop i {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--bg);
+    border: 1.5px solid var(--line-strong);
+    position: relative;
+    z-index: 1;
+  }
+
+  .stop.past i { background: var(--ink-3); border-color: var(--ink-3); }
+
+  .stop.now i {
+    width: 11px;
+    height: 11px;
+    margin-top: -2px;
+    background: var(--teal);
+    border-color: var(--teal);
+    box-shadow: 0 0 0 3px var(--teal-wash);
+  }
+
+  .card.is-blocked .stop.now i { background: var(--red); border-color: var(--red); box-shadow: 0 0 0 3px var(--red-wash); }
+  .card.is-ready  .stop.now i { background: var(--green); border-color: var(--green); box-shadow: 0 0 0 3px var(--green-wash); }
+
+  .stop span {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 9.5px;
+    letter-spacing: .04em;
+    color: var(--ink-3);
+    text-align: center;
+    overflow-wrap: anywhere;
+  }
+
+  .stop.now span { color: var(--ink); font-weight: 500; }
+
+  /* findings */
+  .findings { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+
+  .finding {
+    display: grid;
+    grid-template-columns: 62px 1fr;
+    gap: 10px;
+    padding: 8px 11px;
+    border-top: 1px solid var(--line);
+    font-size: 13.5px;
+    background: var(--surface);
+  }
+
+  .finding:first-child { border-top: 0; }
+
+  .sev {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    padding-top: 3px;
+  }
+
+  .sev.high   { color: var(--red); }
+  .sev.medium { color: var(--amber); }
+  .sev.low    { color: var(--ink-3); }
+
+  .fix { display: block; margin-top: 3px; font-size: 12.5px; color: var(--ink-2); }
+
+  /* tickets */
+  .tickets { display: flex; flex-direction: column; gap: 0; }
+
+  .ticket {
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+    padding: 6px 0;
+    border-top: 1px dotted var(--line);
+    font-size: 13.5px;
+    flex-wrap: wrap;
+  }
+
+  .ticket:first-child { border-top: 0; }
+
+  .fam {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+    transform: translateY(-1px);
+  }
+
+  .fam.anthropic { background: var(--clay); }
+  .fam.openai    { background: var(--teal); }
+  .fam.unknown   { background: var(--line-strong); }
+
+  .ticket .t { flex: 1 1 auto; min-width: 120px; }
+  .ticket .m { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-3); }
+
+  .moved {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--teal);
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    padding: 1px 5px;
+  }
+
+  /* agents */
+  .agents { display: flex; flex-wrap: wrap; gap: 6px; }
+
+  .agent {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11.5px;
+    padding: 3px 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--ink-2);
+  }
+
+  .agent.live { border-color: var(--teal); color: var(--teal); background: var(--teal-wash); }
+
+  .agent i {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--ink-3);
+    flex: 0 0 auto;
+  }
+
+  .agent.live i { background: var(--teal); animation: beat 1.9s ease-in-out infinite; }
+
+  @keyframes beat { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .agent.live i { animation: none; }
+  }
+
+  .agent .dur { color: var(--ink-3); }
+
+  /* facts grid */
+  .facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px 18px;
+  }
+
+  .fact .v { font-size: 13.5px; margin-top: 1px; overflow-wrap: anywhere; }
+  .fact .v.mono { font-size: 12.5px; }
+
+  /* timeline */
+  details.log { border-top: 1px solid var(--line); padding-top: 11px; }
+
+  details.log summary {
+    cursor: pointer;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    list-style: none;
+  }
+
+  details.log summary::-webkit-details-marker { display: none; }
+  details.log summary::before { content: "▸ "; }
+  details.log[open] summary::before { content: "▾ "; }
+  details.log summary:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+  .events { margin: 10px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+
+  .event {
+    display: grid;
+    grid-template-columns: 54px 78px 1fr;
+    gap: 8px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11.5px;
+    color: var(--ink-2);
+  }
+
+  .event .k.start { color: var(--teal); }
+  .event .k.stop  { color: var(--ink-3); }
+
+  /* unreadable */
+  .card.is-unreadable { background: var(--surface-2); box-shadow: none; border-style: dashed; }
+  .card.is-unreadable .card-body { font-size: 13.5px; color: var(--ink-2); }
+
+  /* ---- footer --------------------------------------------------------- */
+  .colophon {
+    margin-top: 26px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+    font-size: 12.5px;
+    color: var(--ink-3);
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .colophon code {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11.5px;
+    background: var(--sunk);
+    border-radius: 3px;
+    padding: 1.5px 5px;
+    color: var(--ink-2);
+  }
+
+  @media (max-width: 460px) {
+    .verdict { font-size: 19px; }
+    .event { grid-template-columns: 50px 1fr; }
+    .event .k { display: none; }
+    .stop span { font-size: 8.5px; }
+  }
+</style>
+
+<header class="masthead">
+  <div class="wrap">
+    <div class="brandrow">
+      <div class="brand">
+        <b>Duet Cycle Board</b>
+        <span class="pairing"><span class="a" id="cfg-anthropic">—</span> · <span class="o" id="cfg-openai">—</span></span>
+      </div>
+      <span class="label" id="asof">—</span>
+    </div>
+    <div>
+      <div class="verdict" id="verdict">Reading the board…</div>
+      <div class="verdict-sub" id="verdict-sub"></div>
+    </div>
+    <div class="quota" id="quota"></div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="notice" id="preview-notice" hidden>
+    <b>Example data.</b> These are not your projects — the board is showing a sample cycle so you
+    can see the layout. Real state arrives the first time you run <code>duet dash --html</code> on the
+    machine your projects live on.
+  </div>
+
+  <div class="toolbar">
+    <div class="segs" role="group" aria-label="Filter projects">
+      <button type="button" id="f-all" aria-pressed="true">All</button>
+      <button type="button" id="f-mine" aria-pressed="false">Needs me</button>
+    </div>
+    <span class="label" id="mode">—</span>
+  </div>
+
+  <ul class="projects" id="projects"></ul>
+
+  <div class="colophon">
+    <div>
+      A snapshot, not a feed. The board shows the last push — nothing here polls your machine,
+      because a hook cannot publish a page. Push a fresh one with
+      <code>duet dash --html</code>, or ask for <code>/duet:brief</code> to have it read out loud.
+    </div>
+    <div id="roots"></div>
+  </div>
+</main>
+
+<script>
+  const DUET = __DUET_DATA__;
+
+  const PHASES = ['planned', 'sealed', 'audited', 'building', 'built', 'verified'];
+
+  const el = (tag, cls, text) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  };
+
+  const clock = (iso) => {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(+d)) return String(iso).slice(0, 16);
+    return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
+  const hhmm = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(+d)) return String(iso).slice(11, 16);
+    return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const took = (ms) => {
+    if (!ms || ms < 0) return '';
+    const s = Math.round(ms / 1000);
+    if (s < 60) return s + 's';
+    const m = Math.floor(s / 60);
+    return m < 60 ? m + 'm' : Math.floor(m / 60) + 'h' + String(m % 60).padStart(2, '0');
+  };
+
+  const since = (iso) => {
+    if (!iso) return '';
+    const mins = Math.round((Date.now() - new Date(iso)) / 60000);
+    if (!Number.isFinite(mins)) return '';
+    if (mins < 1) return 'just now';
+    if (mins < 60) return mins + ' min ago';
+    const h = Math.floor(mins / 60);
+    if (h < 24) return h + 'h ago';
+    return Math.floor(h / 24) + 'd ago';
+  };
+
+  /* ---- masthead ------------------------------------------------------- */
+  function header() {
+    const c = DUET.config || {};
+    document.getElementById('cfg-anthropic').textContent = (c.workers && c.workers.anthropic) || 'anthropic';
+    document.getElementById('cfg-openai').textContent = c.auditor || 'openai';
+    document.getElementById('mode').textContent = (c.auditMode || 'mode ?') + (c.crossFamilyReview ? ' · cross-family review' : '');
+
+    const stamp = document.getElementById('asof');
+    stamp.textContent = 'pushed ' + clock(DUET.generatedAt) + (since(DUET.generatedAt) ? ' · ' + since(DUET.generatedAt) : '');
+
+    const s = DUET.summary || {};
+    const needs = (DUET.projects || []).filter((p) => p.readable && p.waitingOn && p.waitingOn.what === 'you');
+    const blocked = needs.filter((p) => p.gate && p.gate.blocked);
+
+    const v = document.getElementById('verdict');
+    const sub = document.getElementById('verdict-sub');
+
+    if (!(DUET.projects || []).length) {
+      v.textContent = 'No projects registered yet.';
+      sub.textContent = 'A project registers itself the first time duet runs in it.';
+    } else if (!needs.length) {
+      v.classList.add('calm');
+      v.innerHTML = '<em>Nothing needs you.</em> ' + s.active + ' of ' + s.total + ' cycles running.';
+      sub.textContent = 'Claude and Astra have the floor.';
+    } else {
+      const names = needs.map((p) => p.name).join(', ');
+      v.innerHTML = '<em>' + needs.length + (needs.length === 1 ? ' project needs you' : ' projects need you') + '</em> — ' + names + '.';
+      sub.textContent = blocked.length
+        ? blocked.length + (blocked.length === 1 ? ' is' : ' are') + ' halted by an audit finding; work there is refused until it is answered.'
+        : 'Cycles finished and waiting on your call.';
+    }
+
+    const q = document.getElementById('quota');
+    for (const m of DUET.quota || []) {
+      const box = el('div', 'meter');
+      const name = el('div', 'meter-name');
+      name.append(el('span', 'n', m.model));
+      name.append(el('span', 'v', m.tracked ? m.used + ' / ' + (m.budget != null ? m.budget : '∞') : 'untracked'));
+      box.append(name);
+
+      const pct = m.budget ? Math.min(100, Math.round((m.used / m.budget) * 100)) : 0;
+      const track = el('div', 'track');
+      const fill = el('div', 'fill' + (/^gpt|^o\d/i.test(m.model) ? '' : ' anthropic') + (pct >= 85 ? ' hot' : ''));
+      fill.style.width = Math.max(pct, m.used ? 2 : 0) + '%';
+      track.append(fill);
+      box.append(track);
+
+      const foot = el('div', 'meter-foot');
+      foot.textContent = m.exhausted
+        ? 'budget spent — resets ' + clock(m.resetsAt)
+        : m.resetsAt
+          ? (m.remaining != null ? m.remaining + ' left' : '') + ' · window resets ' + hhmm(m.resetsAt)
+          : (m.remaining != null ? m.remaining + ' left in this 5-hour window' : 'no calls yet this window');
+      box.append(foot);
+      q.append(box);
+    }
+  }
+
+  /* ---- one project ---------------------------------------------------- */
+  function card(p) {
+    const li = el('li', 'card');
+    li.dataset.needs = p.readable && p.waitingOn && p.waitingOn.what === 'you' ? 'yes' : 'no';
+
+    const head = el('div', 'card-head');
+    head.append(el('h2', null, p.name));
+
+    if (!p.readable) {
+      li.classList.add('is-unreadable');
+      head.append(el('span', 'pill idle', 'unreadable'));
+      li.append(head);
+      const body = el('div', 'card-body');
+      body.append(el('div', null, p.problem || 'state could not be read'));
+      const hint = el('div', 'label');
+      hint.textContent = p.root || '';
+      body.append(hint);
+      li.append(body);
+      return li;
+    }
+
+    const w = p.waitingOn || { what: 'unknown', why: '', urgency: 'normal' };
+    if (p.gate && p.gate.blocked) li.classList.add('is-blocked');
+    else if (p.phase === 'verified') li.classList.add('is-ready');
+
+    head.append(el('span', 'pill ' + w.urgency, p.phase || 'no cycle'));
+    li.append(head);
+
+    const body = el('div', 'card-body');
+
+    /* the operative line */
+    const waiting = el('div', 'waiting');
+    const who = w.what === 'you' ? 'You' : w.what === 'claude' ? 'Claude' : w.what === 'nothing' ? 'Nobody' : w.what;
+    waiting.innerHTML = '<strong>' + who + '</strong> — ' + escapeText(w.why || '');
+    body.append(waiting);
+
+    /* phase rail */
+    if (p.phaseActive && p.phase) {
+      const at = PHASES.indexOf(p.phase);
+      const rail = el('div', 'rail');
+      PHASES.forEach((name, i) => {
+        const stop = el('div', 'stop' + (i < at ? ' past' : i === at ? ' now' : ''));
+        stop.append(el('i'));
+        stop.append(el('span', null, name));
+        rail.append(stop);
+      });
+      body.append(rail);
+    }
+
+    /* what the auditor said, when it stopped the work */
+    if (p.gate && p.gate.blocked) {
+      const block = el('div');
+      const lab = el('div', 'label');
+      lab.textContent = 'held by the ' + p.gate.checkpoint + ' audit · ' + clock(p.gate.at);
+      block.append(lab);
+      const list = el('div', 'findings');
+      list.style.marginTop = '7px';
+      for (const f of p.gate.findings || []) {
+        const row = el('div', 'finding');
+        row.append(el('div', 'sev ' + (f.severity || 'low'), f.severity || 'note'));
+        const txt = el('div');
+        txt.append(document.createTextNode(f.summary || ''));
+        if (f.suggestion) txt.append(el('span', 'fix', '→ ' + f.suggestion));
+        row.append(txt);
+        list.append(row);
+      }
+      if (!(p.gate.findings || []).length) {
+        const row = el('div', 'finding');
+        row.append(el('div', 'sev low', 'note'));
+        row.append(el('div', null, p.gate.summary || 'no detail recorded'));
+        list.append(row);
+      }
+      block.append(list);
+      body.append(block);
+    }
+
+    /* tickets, coloured by which family owns them */
+    if (p.bundle && (p.bundle.tickets || []).length) {
+      const box = el('div');
+      const counts = {};
+      for (const t of p.bundle.tickets) counts[t.family || 'unknown'] = (counts[t.family || 'unknown'] || 0) + 1;
+      const moved = p.bundle.tickets.filter((t) => t.redirected).length;
+      const lab = el('div', 'label');
+      lab.textContent = p.bundle.tickets.length + ' tickets · '
+        + Object.entries(counts).map(([f, n]) => n + ' ' + f).join(' · ')
+        + (moved ? ' · ' + moved + ' rerouted by the auditor' : '');
+      box.append(lab);
+
+      const list = el('div', 'tickets');
+      list.style.marginTop = '5px';
+      for (const t of p.bundle.tickets) {
+        const row = el('div', 'ticket');
+        row.append(el('i', 'fam ' + (t.family || 'unknown')));
+        row.append(el('span', 't', t.title || 'untitled'));
+        if (t.model) row.append(el('span', 'm', t.model));
+        if (t.redirected) row.append(el('span', 'moved', 'rerouted'));
+        list.append(row);
+      }
+      box.append(list);
+      body.append(box);
+    }
+
+    /* agents */
+    const agents = p.subagents || [];
+    if (agents.length) {
+      const box = el('div');
+      const live = agents.filter((a) => a.state === 'running');
+      const lab = el('div', 'label');
+      lab.textContent = live.length
+        ? (live.length === 1 ? 'one agent in flight' : live.length + ' agents in flight')
+        : 'agents this cycle';
+      box.append(lab);
+
+      const row = el('div', 'agents');
+      row.style.marginTop = '6px';
+      const seen = new Set();
+      for (const a of agents) {
+        const key = a.agent + a.state;
+        if (a.state === 'done' && seen.has(a.agent)) continue;
+        if (a.state === 'done') seen.add(a.agent);
+        const chip = el('div', 'agent' + (a.state === 'running' ? ' live' : ''));
+        chip.append(el('i'));
+        chip.append(el('span', null, a.agent));
+        // "for 14m" on a live agent, "14m" on a finished one — same number means
+        // two different things, so the preposition earns its place.
+        if (a.state === 'running') chip.append(el('span', 'dur', 'for ' + (took(Date.now() - new Date(a.startedAt)) || '0s')));
+        else if (a.ms) chip.append(el('span', 'dur', took(a.ms)));
+        row.append(chip);
+      }
+      box.append(row);
+      body.append(box);
+    }
+
+    /* facts */
+    const facts = el('div', 'facts');
+    const latest = (p.audits || [])[0];
+    const add = (k, v, mono) => {
+      const f = el('div', 'fact');
+      f.append(el('div', 'label', k));
+      f.append(el('div', 'v' + (mono ? ' mono' : ''), v));
+      facts.append(f);
+    };
+
+    if (latest) {
+      const high = (latest.findings || []).filter((f) => f.severity === 'high').length;
+      add('last audit', latest.checkpoint + ' → ' + latest.verdict + (high ? ' · ' + high + ' high' : ''));
+    }
+    if (p.git && p.git.branch) {
+      add('branch', p.git.branch + (p.git.dirty ? '  (' + p.git.dirty + ' uncommitted)' : '  clean'), true);
+    }
+    if (p.git && p.git.lastCommit) add('head', p.git.lastCommit, true);
+    if (p.bundle && p.bundle.brief) add('brief', p.bundle.brief);
+    if (p.lastTouched) add('last activity', since(p.lastTouched) || clock(p.lastTouched));
+    if (facts.children.length) body.append(facts);
+
+    /* timeline */
+    if ((p.recent || []).length) {
+      const log = el('details', 'log');
+      log.append(el('summary', null, 'activity (' + p.recent.length + ')'));
+      const list = el('ul', 'events');
+      for (const e of p.recent.slice(0, 24)) {
+        const row = el('li', 'event');
+        row.append(el('span', null, hhmm(e.at)));
+        row.append(el('span', 'k ' + (String(e.type).endsWith('start') ? 'start' : 'stop'), String(e.type).replace('subagent.', '')));
+        row.append(el('span', null, e.agent || e.note || ''));
+        list.append(row);
+      }
+      log.append(list);
+      body.append(log);
+    }
+
+    li.append(body);
+    return li;
+  }
+
+  function escapeText(s) {
+    const d = document.createElement('div');
+    d.textContent = String(s);
+    return d.innerHTML;
+  }
+
+  /* ---- render --------------------------------------------------------- */
+  function render() {
+    header();
+    if (DUET.preview) document.getElementById('preview-notice').hidden = false;
+
+    const list = document.getElementById('projects');
+    const order = { blocked: 0, attention: 1, normal: 2, idle: 3 };
+    const projects = [...(DUET.projects || [])].sort((a, b) => {
+      if (a.readable !== b.readable) return a.readable ? -1 : 1;
+      const ua = order[(a.waitingOn || {}).urgency] ?? 4;
+      const ub = order[(b.waitingOn || {}).urgency] ?? 4;
+      return ua - ub;
+    });
+
+    for (const p of projects) list.append(card(p));
+
+    const roots = document.getElementById('roots');
+    roots.textContent = projects.length
+      ? 'Watching: ' + projects.map((p) => p.name).join(' · ')
+      : '';
+
+    const all = document.getElementById('f-all');
+    const mine = document.getElementById('f-mine');
+    const apply = (onlyMine) => {
+      all.setAttribute('aria-pressed', String(!onlyMine));
+      mine.setAttribute('aria-pressed', String(onlyMine));
+      for (const li of list.children) {
+        li.hidden = onlyMine && li.dataset.needs !== 'yes';
+      }
+      try { localStorage.setItem('duet.filter', onlyMine ? 'mine' : 'all'); } catch (e) { /* private window */ }
+    };
+    all.addEventListener('click', () => apply(false));
+    mine.addEventListener('click', () => apply(true));
+
+    let saved = 'all';
+    try { saved = localStorage.getItem('duet.filter') || 'all'; } catch (e) { /* no storage */ }
+    apply(saved === 'mine');
+  }
+
+  render();
+</script>

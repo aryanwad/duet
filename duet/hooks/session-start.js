@@ -19,6 +19,22 @@ function main() {
   const codex = require('../lib/codex.js');
 
   const cfg = config.load();
+
+  /**
+   * Register this project if duet has state here, so `duet dash` sees it
+   * without anyone maintaining a list. A dashboard that silently omits a
+   * project is worse than none — a missing project reads as "nothing
+   * happening there", which is a claim rather than an absence of data.
+   */
+  try {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const cwd = process.cwd();
+    if (fs.existsSync(path.join(cwd, '.duet'))) {
+      require('../lib/registry.js').remember(cwd);
+    }
+  } catch { /* registration is never worth failing a session over */ }
+
   const notes = [];
 
   if (cfg.auditMode === 'on-demand') return; // nothing automatic to warn about

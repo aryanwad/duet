@@ -11,6 +11,8 @@ const router = require('../lib/router.js');
 const gates = require('../lib/gate.js');
 const phases = require('../lib/phase.js');
 const clearances = require('../lib/clearance.js');
+const registry = require('../lib/registry.js');
+const dash = require('../lib/dash.js');
 
 function parseArgs(argv) {
   const positional = [];
@@ -232,6 +234,122 @@ const COMMANDS = {
       '',
       'Run: /duet:commit   (reviews, then commits and pushes)',
     ].join('\n'), false);
+  },
+
+  async projects({ positional, flags }) {
+    const json = Boolean(flags.json);
+    const sub = positional[1] || 'list';
+
+    if (sub === 'add') {
+      const root = positional[2] || process.cwd();
+      registry.remember(root, { name: flags.name && flags.name !== true ? flags.name : null });
+      return out(`registered ${require('node:path').resolve(root)}`, false);
+    }
+    if (sub === 'remove' || sub === 'forget') {
+      const root = positional[2];
+      if (!root) throw new Error('projects remove needs a path');
+      registry.forget(root);
+      return out(`unregistered ${require('node:path').resolve(root)}`, false);
+    }
+    if (sub === 'list') {
+      const projects = registry.list();
+      if (json) return out(projects, true);
+      if (!projects.length) {
+        return out('no projects registered yet — they register themselves the first time duet runs in them,\nor add one now: duet projects add <path>', false);
+      }
+      return out(projects.map((p) => {
+        const flag = !p.exists ? 'MISSING ' : !p.hasDuet ? 'no .duet' : 'ok      ';
+        return `  ${flag} ${p.name.padEnd(24)} ${p.root}`;
+      }).join('\n'), false);
+    }
+    throw new Error(`unknown: projects ${sub}`);
+  },
+
+  async dash({ flags }) {
+    const model = dash.collect();
+    if (flags.json) return out(model, true);
+
+    if (flags.html) {
+      const page = require('../lib/page.js');
+      const target = flags.html === true
+        ? require('node:path').join(require('node:os').tmpdir(), 'duet-dashboard.html')
+        : flags.html;
+      const written = page.write(model, target);
+      return out([
+        `wrote ${written}`,
+        '',
+        'Hand that file to Claude and ask it to publish (or republish) the board.',
+        'It is a snapshot: the page shows this moment, not a live feed.',
+      ].join('\n'), false);
+    }
+
+    const lines = [];
+    const s = model.summary;
+
+    lines.push(`duet — ${s.total} project(s), ${s.active} active, ${s.blocked} blocked, ${s.needsYou} waiting on you`);
+    lines.push(`${model.config.auditMode} · auditor ${model.config.auditor}`);
+
+    const qline = model.quota
+      .map((q) => `${q.model} ${q.used}/${q.budget ?? '-'}`)
+      .join('   ');
+    if (qline) lines.push(`quota: ${qline}`);
+    lines.push('');
+
+    if (!model.projects.length) {
+      lines.push('No projects registered. They register themselves the first time duet');
+      lines.push('runs in them, or: duet projects add <path>');
+      return out(lines.join('\n'), false);
+    }
+
+    for (const p of model.projects) {
+      lines.push(`── ${p.name} ${'─'.repeat(Math.max(0, 56 - p.name.length))}`);
+
+      if (!p.readable) {
+        lines.push(`   unreadable: ${p.problem}`);
+        lines.push('');
+        continue;
+      }
+
+      const w = p.waitingOn;
+      const mark = w.urgency === 'blocked' ? '!!' : w.urgency === 'attention' ? ' >' : '  ';
+      lines.push(`${mark} phase    : ${p.phase || 'no cycle'}`);
+      lines.push(`   waiting  : ${w.what} — ${w.why}`);
+
+      if (p.gate.blocked) {
+        lines.push(`   BLOCKED  : ${p.gate.checkpoint} audit — ${p.gate.summary}`);
+        for (const f of (p.gate.findings || []).slice(0, 3)) {
+          lines.push(`              [${f.severity}] ${f.summary}`);
+        }
+      }
+
+      if (p.bundle) {
+        const done = p.bundle.tickets.length;
+        const redirected = p.bundle.tickets.filter((t) => t.redirected).length;
+        lines.push(`   bundle   : ${done} ticket(s)${redirected ? `, ${redirected} redirected by the auditor` : ''}`);
+        const byFamily = {};
+        for (const t of p.bundle.tickets) byFamily[t.family || '?'] = (byFamily[t.family || '?'] || 0) + 1;
+        lines.push(`              ${Object.entries(byFamily).map(([f, n]) => `${f}:${n}`).join('  ')}`);
+      }
+
+      const latest = p.audits[0];
+      if (latest) {
+        const high = latest.findings.filter((f) => f.severity === 'high').length;
+        lines.push(`   audit    : ${latest.checkpoint} → ${latest.verdict}${high ? ` (${high} high)` : ''}  ${latest.at?.slice(0, 16) || ''}`);
+      }
+
+      const running = p.subagents.filter((a) => a.state === 'running');
+      if (running.length) {
+        lines.push(`   running  : ${running.map((a) => a.agent).join(', ')}`);
+      }
+      const recentAgents = [...new Set(p.subagents.filter((a) => a.state === 'done').map((a) => a.agent))].slice(0, 4);
+      if (recentAgents.length) lines.push(`   agents   : ${recentAgents.join(', ')}`);
+
+      lines.push(`   git      : ${p.git.branch || '?'}${p.git.dirty ? ` (${p.git.dirty} dirty)` : ''}${p.git.lastCommit ? `  ${p.git.lastCommit.slice(0, 50)}` : ''}`);
+      if (p.lastTouched) lines.push(`   touched  : ${p.lastTouched.slice(0, 16)}`);
+      lines.push('');
+    }
+
+    return out(lines.join('\n'), false);
   },
 
   async gate({ positional, flags }) {
@@ -499,6 +617,8 @@ async function main() {
   duet bundle show [id]            render the shared context view
   duet bundle verify [id]          confirm a sealed bundle was not edited
   duet audit <plan|batch|feature|premerge> [--force] [--automatic] [--extra "..."] [--no-apply]
+  duet dash [--json] [--html <file>]   every registered project in one view
+  duet projects list | add <path> | remove <path>
   duet phase start [planned] | show | set <phase> [--force] | stop
   duet gate show | clear --reason "..." | history
   duet clearance show | revoke

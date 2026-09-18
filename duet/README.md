@@ -248,11 +248,48 @@ duet phase start [planned] | show | set <phase> [--force] | stop
 duet gate show | clear --reason "..." | history
 duet route --tickets @tickets.json
 duet quota show | record <model> [kind] | reset
+duet dash [--json] [--html <file>]
+duet projects list | add <path> | remove <path>
 duet status
 duet doctor
 ```
 
 Add `--json` to any command for machine-readable output.
+
+## Seeing across projects
+
+Running several cycles at once, the thing you lose first is which one is
+blocked and on what. `duet dash` answers that for every project at once, and
+`/duet:brief` has Claude read the same payload out loud — what moved, what
+Astra flagged, what is waiting on you.
+
+Projects register themselves: the SessionStart hook records any directory it
+sees with a `.duet/` in it. A repo you delete stays listed as missing rather
+than vanishing, because a dropped project reads exactly like a quiet one.
+
+For a version you can check from your phone:
+
+```bash
+duet dash --html /tmp/duet-board.html
+```
+
+then ask Claude to publish that file as an artifact — or to republish it to an
+existing board's URL, so the link you saved keeps working.
+
+It is a snapshot, not a feed, and the page says so. A Claude Code hook cannot
+publish a page and a hosted page cannot reach your laptop, so the board shows
+the last push. A dashboard that quietly showed yesterday's state would be worse
+than no dashboard.
+
+### Where the subagent list comes from
+
+duet logs its own dispatches. `SubagentStart` and `SubagentStop` append to
+`<repo>/.duet/activity.jsonl`, in a format this project owns.
+
+The alternative was parsing Claude Code's session transcripts, which nobody
+promised would keep their shape. When that parser broke it would not throw — it
+would return nothing, and an empty timeline looks like an idle project rather
+than a dead parser. Owning the format costs a hook and buys certainty.
 
 ## Tests
 
@@ -260,11 +297,13 @@ Add `--json` to any command for machine-readable output.
 npm test
 ```
 
-118 tests covering bundle hash determinism and tamper detection, classification,
+173 tests covering bundle hash determinism and tamper detection, classification,
 cross-family routing and degradation, the rolling quota window and reserve
 logic, verdict parsing, redirect matching and re-sealing, block-gate lifecycle,
-phase-machine transitions, mutation classification, plan auto-detection, and Codex argv
-construction. The hook tests run it as a real subprocess with real stdin,
+phase-machine transitions, mutation classification, plan auto-detection, Codex argv
+construction, and the dashboard's failure modes — torn log lines, unpaired
+subagent starts, dangling bundle pointers, and payloads that try to break out of
+the page's script block. The hook tests run it as a real subprocess with real stdin,
 because what's under test is the contract with Claude Code — exit 2 plus a
 deny decision — and a wiring bug there would pass any in-process test.
 
