@@ -90,6 +90,40 @@ const COMMANDS = {
       );
     }
 
+    if (sub === 'reseal') {
+      const has = (flag) => flag !== undefined && flag !== false;
+      const result = bundles.reseal({
+        plan: has(flags.plan) ? readJsonFlag(flags.plan, null) : undefined,
+        tickets: has(flags.tickets) ? readJsonFlag(flags.tickets, []) : undefined,
+        brief: has(flags.brief) ? readMaybeFile(flags.brief) : undefined,
+        constraints: has(flags.constraints) ? readJsonFlag(flags.constraints, []) : undefined,
+        note: flags.note && flags.note !== true ? flags.note : '',
+      });
+
+      if (json) return out(result, true);
+
+      if (result.unchanged) {
+        // Worth saying loudly: a re-seal that changed nothing means the next
+        // audit is about to be refused, and the caller thinks it fixed something.
+        process.exitCode = 2;
+        return out([
+          `re-sealed ${result.bundle.id}, but the content hash is unchanged.`,
+          '',
+          `Nothing you passed differs from ${result.previousId}. The auditor would read the`,
+          'same text and return the same findings — fix the plan or tickets for real,',
+          'then re-seal again.',
+        ].join('\n'), false);
+      }
+
+      return out([
+        `re-sealed ${result.previousId} -> ${result.bundle.id}`,
+        `sha256:${result.bundle.hash}`,
+        `revised: ${result.changed.join(', ')}`,
+        '',
+        'The auditor now has something new to read.',
+      ].join('\n'), false);
+    }
+
     if (sub === 'show') {
       const bundle = bundles.load(positional[2] || null);
       if (!bundle) throw new Error('no bundle found; create one with: duet bundle create --brief "..."');
@@ -120,7 +154,35 @@ const COMMANDS = {
 
     if (json) return out(result, true);
 
-    if (result.skipped) return out(`audit skipped: ${result.reason}`, false);
+    if (result.skipped) {
+      // The two skips that mean "you are about to loop" get a way out printed
+      // with them. A model reading this decides what to do next from this text.
+      if (result.unchanged) {
+        process.exitCode = 4;
+        return out([
+          `audit skipped: ${result.reason}`,
+          '',
+          'Re-seal with whatever you changed, then audit again:',
+          '  duet bundle reseal --plan @docs/plans/<plan>.json --note "addressed <finding>"',
+        ].join('\n'), false);
+      }
+      if (result.capped) {
+        process.exitCode = 5;
+        return out([
+          `audit skipped: ${result.reason}`,
+          '',
+          result.gate?.blocked
+            ? `The gate is still closed by: ${result.gate.summary}`
+            : 'The gate is open; the cap is simply spent for this cycle.',
+          '',
+          'Options:',
+          '  duet gate clear --reason "..."      accept the outstanding findings and proceed',
+          '  duet audit <checkpoint> --force     buy another round',
+          '  duet config set audit.maxRounds 8   raise the cap for future cycles',
+        ].join('\n'), false);
+      }
+      return out(`audit skipped: ${result.reason}`, false);
+    }
     if (!result.ok) {
       process.exitCode = 1;
       return out(`audit failed: ${result.reason}`, false);
@@ -129,6 +191,7 @@ const COMMANDS = {
     const lines = [
       `verdict: ${result.verdict.toUpperCase()}  (${result.checkpoint}, ${result.auditor.model} @ ${result.auditor.effort})`,
       `bundle:  ${result.bundleId}`,
+      `round:   ${result.rounds.used} of ${result.rounds.max}${result.rounds.remaining ? ` (${result.rounds.remaining} left this cycle)` : ' — cap reached'}`,
       '',
       result.text,
     ];
@@ -153,9 +216,29 @@ const COMMANDS = {
       lines.push('Recorded as addressed by re-audit, not overridden.');
     }
 
+    if (result.escalated) {
+      lines.push('', result.repeated ? '--- NOT CONVERGING, PROCEEDING ---' : '--- PROCEEDING PAST THE CAP ---');
+      lines.push(result.repeated
+        ? `The ${result.checkpoint} audit returned identical findings twice running after ${result.rounds.used} round(s). `
+          + 'The fix is not landing, so another round would buy the same paragraph again.'
+        : `${result.rounds.used} audits at the ${result.checkpoint} checkpoint and the verdict is still "block".`);
+      lines.push('The gate is open and work continues. These findings stay on the record:');
+      for (const f of result.escalated.outstanding) lines.push(`  [${f.severity}] ${f.summary}`);
+      lines.push('');
+      lines.push('This cycle is marked as having shipped with them unresolved —');
+      lines.push('/duet:brief and the dashboard will both say so.');
+      lines.push('Set audit.onCap to "halt" if you would rather it stopped here instead.');
+      process.exitCode = 3;
+    }
+
     if (result.blocked) {
       lines.push('', '--- GATE CLOSED ---');
       lines.push('Dispatch is refused until this is cleared.');
+      lines.push(`Fix the findings, re-seal, and audit again — ${result.rounds.remaining} round(s) left this cycle:`);
+      lines.push('  duet bundle reseal --plan @<plan>.json --note "addressed <finding>"');
+      lines.push(`  duet audit ${result.checkpoint}`);
+      lines.push('');
+      lines.push('Or, to accept the finding and move on:');
       lines.push(`  duet gate clear --reason "..."`);
       process.exitCode = 2;
     }
@@ -287,6 +370,9 @@ const COMMANDS = {
     const s = model.summary;
 
     lines.push(`duet — ${s.total} project(s), ${s.active} active, ${s.blocked} blocked, ${s.needsYou} waiting on you`);
+    if (s.shippedWithFindings) {
+      lines.push(`${s.shippedWithFindings} project(s) proceeded past an audit cap with findings unresolved`);
+    }
     lines.push(`${model.config.auditMode} · auditor ${model.config.auditor}`);
 
     const qline = model.quota
@@ -314,6 +400,13 @@ const COMMANDS = {
       const mark = w.urgency === 'blocked' ? '!!' : w.urgency === 'attention' ? ' >' : '  ';
       lines.push(`${mark} phase    : ${p.phase || 'no cycle'}`);
       lines.push(`   waiting  : ${w.what} — ${w.why}`);
+
+      for (const e of (p.escalations || [])) {
+        lines.push(`   SHIPPED  : ${e.checkpoint} audit hit its cap (${e.used}/${e.max}) — proceeded with findings open`);
+        for (const f of e.escalated.outstanding.slice(0, 3)) {
+          lines.push(`              [${f.severity}] ${f.summary}`);
+        }
+      }
 
       if (p.gate.blocked) {
         lines.push(`   BLOCKED  : ${p.gate.checkpoint} audit — ${p.gate.summary}`);
@@ -616,6 +709,8 @@ async function main() {
   duet bundle create --brief "..." [--plan @plan.json] [--tickets @t.json] [--base main]
   duet bundle show [id]            render the shared context view
   duet bundle verify [id]          confirm a sealed bundle was not edited
+  duet bundle reseal [--plan @plan.json] [--tickets @t.json] [--note "..."]
+                                   re-seal after fixing what an audit flagged
   duet audit <plan|batch|feature|premerge> [--force] [--automatic] [--extra "..."] [--no-apply]
   duet dash [--json] [--html <file>]   every registered project in one view
   duet projects list | add <path> | remove <path>

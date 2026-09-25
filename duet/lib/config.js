@@ -65,6 +65,75 @@ const DEFAULTS = Object.freeze({
   },
 
   /**
+   * How the fix-and-re-audit loop terminates.
+   *
+   * The loop is meant to run without a human in it: Astra blocks, Claude fixes
+   * and re-seals, Astra re-reads. Two things stop it running forever.
+   *
+   * maxRounds caps auditor calls per checkpoint per cycle. It is the backstop,
+   * not the primary control — the primary control is that duet refuses to
+   * audit a bundle it has already audited, so a round only costs a call when
+   * something genuinely changed.
+   *
+   * onCap decides what happens when the cap is reached with findings still
+   * outstanding:
+   *   'proceed' - open the gate and carry on, recording the unresolved
+   *               findings as an escalation. Five rounds of disagreement is a
+   *               signal that a sixth will not settle it either.
+   *   'halt'    - leave the gate closed and wait for a person. Safer, and it
+   *               stops an unattended phase dead.
+   *
+   * Proceeding is never silent: the cycle is marked, the findings are kept,
+   * and both /duet:brief and the dashboard report that the phase shipped with
+   * an unresolved finding.
+   */
+  audit: {
+    maxRounds: 5,
+
+    /**
+     * The final review gets more rope than the plan audit. By pre-merge the
+     * work exists, the findings are concrete, and each round is a real edit
+     * against a real diff — the argument is more likely to be worth having.
+     */
+    maxRoundsByCheckpoint: { premerge: 7 },
+
+    onCap: 'proceed',
+
+    /**
+     * Stop early when the loop is not converging.
+     *
+     * If Astra returns the same findings twice running, the fix is not
+     * landing — a third attempt at the same fix costs a call to be told the
+     * same thing. Borrowed from loop_eng's stop rules, which bound its loop on
+     * "same failure twice" and "no progress" rather than on a round count
+     * alone. The round cap is the ceiling; this is what usually ends the loop
+     * before it.
+     */
+    stopOnRepeat: true,
+
+    /**
+     * Hold the turn open while a cycle is mid-phase.
+     *
+     * With this off, "do not stop between the audit and the dispatch" is an
+     * instruction in a prompt, and a turn that ends anyway is a request for
+     * user input that nobody meant to make. With it on, a Stop hook refuses
+     * the turn and tells Claude what the next step is.
+     *
+     * maxContinues is the number of refusals allowed *at the same point*. The
+     * counter resets whenever the cycle's state actually moves, so a long
+     * phase is never punished for being long — only a phase standing still
+     * runs out. On the third refusal at one spot the gate gives up and hands
+     * the turn back, because something is stuck in a way it cannot describe.
+     *
+     * The gate also stands aside when the loop has escalated deliberately: a
+     * closed gate with no rounds left means duet decided it wants a person,
+     * and holding the turn open would trap you in exactly that case.
+     */
+    autoContinue: true,
+    maxContinues: 3,
+  },
+
+  /**
    * Never let a family review its own work. This is the single most valuable
    * rule in the whole plugin; turning it off defeats the point of the setup.
    */

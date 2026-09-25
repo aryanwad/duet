@@ -1,5 +1,5 @@
 {
-  "description": "duet: SessionStart surfaces audit-gate readiness and registers the project for the dashboard; PreToolUse refuses work that arrives before the plan audit or while a blocking verdict stands; PostToolUse starts a cycle when an approved plan is written; Subagent hooks log dispatches so the dashboard knows which agents ran.",
+  "description": "duet: SessionStart surfaces audit-gate readiness and registers the project for the dashboard; PreToolUse refuses work that arrives before the plan audit or while a blocking verdict stands; PostToolUse starts a cycle when an approved plan is written; Stop keeps a mid-phase cycle running instead of handing the turn back; Subagent hooks log dispatches so the dashboard knows which agents ran.",
   "hooks": {
     "SessionStart": [
       {
@@ -53,6 +53,17 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent.js\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-gate.js\"",
             "timeout": 10
           }
         ]

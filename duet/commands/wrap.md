@@ -1,15 +1,19 @@
 ---
-description: Put the bundle and audit gate around a plan that already exists — use after a planning skill has produced one.
+description: Run an approved plan end to end — seal it, converge it with Astra, build it, review it, commit it — stopping only to ask what the next phase should be.
 argument-hint: "[path to the plan file, or nothing to use the plan in context]"
-allowed-tools: Bash(node:*), Bash(codex:*), Bash(git:*), Task, TaskCreate, TaskUpdate, Read, Glob, Grep
+allowed-tools: Bash(node:*), Bash(codex:*), Bash(git:*), Task, TaskCreate, TaskUpdate, Read, Glob, Grep, Edit, Write
 ---
 
-Wrap an **existing** plan in the shared bundle and the audit gate.
+Take a plan the user has already approved and carry it all the way to a commit.
 
-Use this rather than `/duet:run` when the planning has already happened — the
-`writing-plans` skill produced a plan document, or you worked one out in
-conversation. duet does not re-plan here. Re-planning would throw away the
-better plan and produce a worse one.
+**There is exactly one human gate in this command, and it is behind you.** The
+user approved the plan before invoking this. Everything from here — the audit
+rounds, the fixes, the dispatch, the execution, the pre-commit review, the
+commit — runs without asking. You stop again only at step 9, to ask what the
+next phase should be.
+
+Do not pause to report a blocking verdict and wait. A blocking verdict is your
+work to do, not news to deliver. The loop below is how you do it.
 
 ## 1. Start the cycle
 
@@ -17,73 +21,100 @@ better plan and produce a worse one.
 node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" phase start planned
 ```
 
-This turns on enforcement for this project. From here until the plan passes
-its audit, every tool call that would change a file or dispatch a worker is
-**refused by a hook** — not discouraged, refused. That is the point: it makes
-the audit a door rather than a suggestion, including a suggestion you might
-talk yourself out of at step 4.
-
-Tell the user enforcement is on, and that `duet phase stop` ends it.
+Enforcement is now on: until the plan audit passes, any tool call that changes
+a file or dispatches a worker is refused by a hook. Tell the user once, and
+that `duet phase stop` ends it.
 
 ## 2. Read the plan as written
 
-From `$ARGUMENTS` if a path was given, otherwise the plan already in context.
-`writing-plans` saves to `docs/plans/` — look for the file it just wrote before
-assuming there isn't one.
+From `$ARGUMENTS` if a path was given, otherwise the plan in context.
+`writing-plans` saves to `docs/plans/` — look there before assuming there is none.
 
-Do not restructure it. Do not improve it. The value of the audit comes from
-Astra reviewing the plan that will actually be executed; a plan you rewrote on
-the way into the bundle is a plan nobody agreed to.
+Do not restructure it or improve it. The audit is only worth something if Astra
+reviews the plan that will actually be executed.
 
-## 3. Extract the tickets
+## 3. Route the tickets and seal
 
-Turn the plan's steps into tickets without editorialising. If the plan already
-has phases or batches, keep those boundaries — they are someone's considered
-judgment about what can proceed in parallel.
-
-## 4. Route them
+Turn the plan's steps into tickets without editorialising, keeping any phase or
+batch boundaries the plan already draws.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" route --tickets '[...]' --json
-```
 
-This adds the model assignment the plan almost certainly doesn't specify. It
-is additive: the plan says what to do, duet says who should do it.
-
-## 5. Seal and audit
-
-```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" bundle create \
   --brief "<the plan's own goal statement>" \
   --plan '{"summary":"...","steps":[...]}' \
   --tickets '[...]' --constraints '[...]' --base main
+```
 
+Keep the plan JSON you passed. You will be revising and re-passing it in the
+loop below, and reconstructing it from memory each round is how a fix gets lost.
+
+## 4. The plan audit loop — run it to convergence yourself
+
+```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" audit plan \
   --extra "<the riskiest assumption in this plan>"
 ```
 
-Redirects apply automatically and re-seal the bundle. A `block` verdict closes
-the gate and stops dispatch — report it and let the user decide.
+Then repeat until it passes or the cap is reached. Each round:
 
-## 6. Build the task list
+1. **Read the findings at the severity Astra gave them.** You are the audited
+   party; notice the pull toward explaining why each one is fine, and don't.
 
-Only reachable if the audit passed — the hook refuses mutating tool calls
-before phase `audited`, so if you find yourself blocked here, the audit did not
-actually pass and you should re-read its verdict rather than working around it.
+2. **Fix what you accept.** Edit the plan document — plan files are exempt from
+   the gate precisely so this is possible while the gate is closed. Where you
+   disagree with a finding, say so in the plan or in the `--extra` of the next
+   round, with the reason. A finding you rebut with evidence is a good outcome;
+   one you quietly drop is not.
 
-Now create the task list, **from the re-sealed bundle's ticket table** — not
-from the original plan. The re-sealed table is the one the auditor approved and
-whose assignments its redirects may have changed; building the list from the
-pre-audit plan would quietly discard that.
+3. **Re-seal.** This is the step that matters most and the one that is easy to
+   skip:
 
-Use `TaskCreate`, one task per ticket, in the bundle's order. Put the assigned
-family and model in each task's description, so the routing stays visible while
-you work rather than living only in a JSON file.
+   ```bash
+   node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" bundle reseal \
+     --plan '{"summary":"...","steps":[...]}' \
+     --note "addressed: <the finding>"
+   ```
 
-Mark each task `in_progress` when you dispatch it and `completed` when its
-worker reports back — the user is watching this list to follow the run.
+   The plan lives *inside* the sealed bundle. Editing the plan file on disk
+   does not change what the auditor reads. Without this step the next audit
+   hands Astra the identical document and collects the identical findings —
+   a loop that runs to the cap and achieves nothing.
 
-## 7. Execute
+   duet refuses an audit of a plan it has already audited and tells you to
+   re-seal. If you see that message, you skipped this step.
+
+   If `reseal` reports the content unchanged, your fix did not actually change
+   the plan. Fix it for real before auditing again.
+
+4. **Audit again**, naming in `--extra` what you changed and what you disputed.
+
+The command prints `round: N of M`. The cap is 5 by default, per checkpoint,
+per cycle. Re-runs that would show Astra nothing new are refused and cost
+nothing, so the cap only counts rounds where something genuinely moved.
+
+**When the cap is reached and the verdict is still `block`,** duet opens the
+gate itself, records the outstanding findings as an escalation, and prints
+`--- PROCEEDING PAST THE CAP ---`. That is the designed ending, not a failure:
+five rounds of disagreement is evidence that a sixth would not settle it.
+Carry on to step 5. Do not re-audit with `--force` to try to win the argument.
+
+Redirects apply automatically and re-seal the bundle themselves. Report what
+moved and why. If you think a reassignment is wrong, say so with your reasoning
+— but it has already been applied, and that is deliberate.
+
+## 5. Task list, from the re-sealed bundle
+
+Use `TaskCreate`, one task per ticket, in the bundle's order, taken from the
+**re-sealed** table rather than the plan you wrote in step 3 — the re-sealed
+table is the one the auditor saw, and its redirects may have moved assignments.
+
+Put the assigned family and model in each description. Mark each `in_progress`
+on dispatch and `completed` when its worker reports. The user is following this
+list to see where the phase has got to.
+
+## 6. Execute
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" phase set building
@@ -100,40 +131,59 @@ Work the tickets from the **re-sealed** bundle:
   ```
   then `node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" quota record <model> worker`
 
-Collect each worker's "what I am unsure about" section. That is the input to
-the final gate and the reason it is worth a call.
+Collect each worker's "what I am unsure about" section. It is the input to the
+final gate and the reason that call is worth making.
 
-**Commit at each feature boundary, not at the end.** When a coherent feature is
-done — not every ticket, but every meaningful unit — run `/duet:commit`. It
-reviews the diff, and only commits once the review passes. A `git commit` will
-be refused by the hook until it does, so there is no point trying to batch them
-up and commit everything at the end.
+Work the whole phase. Do not stop between tickets to check in.
 
-Do not add yourself to the commit authorship — no `Co-Authored-By: Claude`, no
-"Generated with" line. The commit is the user's.
-
-## 8. Final gate
+## 7. The pre-commit loop
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" phase set built
 
-node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" bundle create \
-  --brief "..." --plan '{...}' --tickets '[...]' --base main
+node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" bundle reseal \
+  --tickets '[...]' --note "as built"
 
 node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" audit premerge \
   --extra "<the workers' stated uncertainties, plus your own>"
 ```
 
 Re-seal first so the bundle reflects what was built rather than what was
-planned. A passing premerge audit moves the phase to `verified`; a blocking one
-closes the gate and the hook stops further edits until it is resolved.
+planned.
 
-## 9. Close the cycle
+Same loop as step 4, same cap, same rule: when Astra blocks, **fix the code,
+re-seal, re-audit** — do not stop and ask. The findings here are about the
+diff, so the fix is an edit, and the re-seal carries the updated repo snapshot
+to the auditor.
+
+At the cap, duet opens the gate and grants commit clearance with the findings
+recorded. The commit goes through. That is intended.
+
+## 8. Commit
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" phase set verified
+```
+
+Then `/duet:commit`. Do not add yourself to the authorship — no
+`Co-Authored-By: Claude`, no "Generated with" line, no 🤖. The commit is the
+user's.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" phase stop
 ```
 
-Then report: what was built, what Astra changed about the plan, what it flagged
-at the end, and what you did about each finding. If anything is still open, say
-so rather than closing the loop tidily.
+## 9. Report, then ask for the next phase
+
+This is where you stop. Tell the user:
+
+- What was built.
+- What Astra changed about the plan, and how many rounds it took.
+- **Anything that shipped with a finding unresolved** — if step 4 or step 7
+  ended with `PROCEEDING PAST THE CAP`, lead with it and quote the findings
+  verbatim. It is the one thing in the whole run that the user could not watch
+  happening and would most want to have known about.
+- What you disagreed with Astra about, and why.
+
+Then ask what the next phase should be. That question is the reason everything
+before it was allowed to run unattended.

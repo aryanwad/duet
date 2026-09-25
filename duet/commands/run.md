@@ -57,9 +57,18 @@ Then:
 - **Redirects are applied automatically** and the bundle is re-sealed. Show the
   user what moved and why. If you disagree with a reassignment, say so out loud
   with your reasoning — but it has already been applied, and that is deliberate.
-- **A `block` verdict closes the gate.** Stop. Show the user the findings and
-  ask how they want to proceed. Do not clear the gate yourself; clearing it is
-  their call and requires a recorded reason.
+- **A `block` verdict closes the gate — fix it and re-audit, do not stop.**
+  Edit the plan (plan files stay writable while the gate is closed), then:
+
+  ```bash
+  node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" bundle reseal --plan '{...}' --note "addressed: <finding>"
+  node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" audit plan --extra "<what changed>"
+  ```
+
+  The re-seal is what makes the next round mean anything: the plan is sealed
+  *inside* the bundle, so editing the file alone leaves the auditor reading the
+  old text. Repeat until it passes or the round cap is reached, at which point
+  duet opens the gate itself and records the findings as unresolved.
 - Present every finding at the severity Astra gave it. You are the audited
   party — notice the pull toward explaining why each one is fine, and don't.
 

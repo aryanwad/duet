@@ -8,6 +8,7 @@ plans, cross-family task routing, and the planning skills that feed it.
 | | |
 |---|---|
 | `duet/` | The plugin. Plan audits, routing, commit clearance, phase enforcement, research agents. |
+| `duet/docs/field-guide.html` | Walkthrough with diagrams: how a phase runs, the audit loop, what each hook enforces. Open it in a browser. |
 | `planning-skills/` | `brainstorming` + `writing-plans`, adapted from [obra/superpowers](https://github.com/obra/superpowers) and repointed at `/duet:wrap`. |
 | `teardown.sh` | Removes an older hand-built gpt-mcp setup, if one exists on the machine. |
 | `clean-claude-md.sh` | Strips GPT-delegation instructions from a global `CLAUDE.md`. |

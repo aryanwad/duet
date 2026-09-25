@@ -48,6 +48,32 @@ function hashContent(content) {
   return crypto.createHash('sha256').update(JSON.stringify(canonicalize(content))).digest('hex');
 }
 
+/**
+ * A hash of the substance alone: the brief, the plan, the tickets, the
+ * constraints. Everything the auditor forms a judgement about, and nothing
+ * else.
+ *
+ * `hash` cannot serve this purpose, because it also covers the repo snapshot
+ * and the notes — and every re-seal appends a note and re-reads git, so the
+ * full hash changes even when nothing an auditor would care about did. Using
+ * it to decide "has this already been audited?" would answer "no" every time,
+ * which is precisely the loop this is meant to end: re-seal, nothing actually
+ * revised, auditor called again, same findings returned.
+ */
+function contentKey(content) {
+  return hashContent({
+    brief: content.brief,
+    plan: content.plan,
+    tickets: content.tickets,
+    constraints: content.constraints,
+  });
+}
+
+/** The substantive key of a bundle, computing it for bundles sealed before it existed. */
+function keyOf(bundle) {
+  return bundle.key || contentKey(bundle.content);
+}
+
 function git(args, cwd) {
   try {
     return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
@@ -114,7 +140,7 @@ function create({
   const hash = hashContent(content);
   const id = `${new Date().toISOString().replace(/[:.]/g, '-')}-${hash.slice(0, 8)}`;
 
-  return { id, createdAt: new Date().toISOString(), hash, content };
+  return { id, createdAt: new Date().toISOString(), hash, key: contentKey(content), content };
 }
 
 function save(bundle, cwd = process.cwd()) {
@@ -138,6 +164,69 @@ function currentId(cwd = process.cwd()) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Re-seal the current bundle with a revised plan or ticket table.
+ *
+ * This step was missing, and its absence was expensive. The plan lives
+ * *inside* the sealed bundle, so fixing the plan document on disk after a
+ * blocking audit changes nothing the auditor will read. Re-running the audit
+ * then hands Astra the same text and collects the same findings, round after
+ * round — which is exactly what a long unconverging loop looks like from the
+ * outside.
+ *
+ * Inherits everything not being changed from the bundle it supersedes, so the
+ * caller supplies only what actually moved. Lineage is recorded in the notes
+ * and in `supersedes`, keeping the chain of what was audited inspectable.
+ */
+function reseal({
+  plan = undefined,
+  tickets = undefined,
+  brief = undefined,
+  constraints = undefined,
+  note = '',
+  bundleId = null,
+  cwd = process.cwd(),
+} = {}) {
+  const previous = load(bundleId, cwd);
+  if (!previous) {
+    throw new Error('nothing to re-seal: no current bundle. Create one with `duet bundle create` first.');
+  }
+
+  const changed = [];
+  if (plan !== undefined) changed.push('plan');
+  if (tickets !== undefined) changed.push('tickets');
+  if (brief !== undefined) changed.push('brief');
+  if (constraints !== undefined) changed.push('constraints');
+
+  if (!changed.length) {
+    throw new Error('re-sealing needs something to change — pass --plan, --tickets, --brief or --constraints');
+  }
+
+  const next = create({
+    brief: brief !== undefined ? brief : previous.content.brief,
+    plan: plan !== undefined ? plan : previous.content.plan,
+    tickets: tickets !== undefined ? tickets : previous.content.tickets,
+    constraints: constraints !== undefined ? constraints : previous.content.constraints,
+    notes: [
+      ...(previous.content.notes || []),
+      `re-sealed from ${previous.id}; revised: ${changed.join(', ')}${note ? ` — ${note}` : ''}`,
+    ],
+    base: previous.content.repo?.base || null,
+    cwd,
+  });
+
+  next.supersedes = previous.id;
+  save(next, cwd);
+
+  // Honest about a no-op. Compared on substance, not on `hash` — the notes and
+  // the repo snapshot move on every re-seal, so `hash` would always differ and
+  // this would always claim success. The caller believes it fixed something;
+  // if it did not, saying so here beats letting the next audit discover it at
+  // the price of an auditor call.
+  const unchanged = keyOf(next) === keyOf(previous);
+  return { resealed: !unchanged, unchanged, bundle: next, previousId: previous.id, changed };
 }
 
 /** Verify a bundle on disk still hashes to what it claims. */
@@ -240,11 +329,14 @@ module.exports = {
   bundlesDir,
   canonicalize,
   hashContent,
+  contentKey,
+  keyOf,
   repoSnapshot,
   create,
   save,
   load,
   currentId,
+  reseal,
   verify,
   render,
 };

@@ -9,6 +9,7 @@ const gate = require('./gate.js');
 const redirect = require('./redirect.js');
 const phase = require('./phase.js');
 const clearance = require('./clearance.js');
+const rounds = require('./rounds.js');
 const { projectDir, ensureDir, writeJson } = require('./state.js');
 
 /**
@@ -172,6 +173,29 @@ async function run({
     };
   }
 
+  /**
+   * Is this call capable of telling us anything new?
+   *
+   * Before the cap, and before anything external: an audit of a bundle already
+   * audited at this checkpoint returns the findings it returned last time, and
+   * charges for the privilege. Refusing it here is what makes the loop
+   * terminate by construction rather than by good intentions in a prompt.
+   *
+   * `force` overrides both, because a deliberate human "do it anyway" should
+   * always be available — but it has to be deliberate.
+   */
+  const round = rounds.check(checkpoint, { bundleKey: bundles.keyOf(bundle), cwd, cfg });
+  if (!round.ok && !force) {
+    return {
+      skipped: true,
+      reason: round.reason,
+      capped: round.why === 'capped',
+      unchanged: round.why === 'unchanged',
+      rounds: round,
+      gate: gate.status(cwd),
+    };
+  }
+
   const pre = codex.preflight();
   if (!pre.ok) return { skipped: true, reason: pre.problems.join('; '), problems: pre.problems };
 
@@ -189,8 +213,10 @@ async function run({
     cwd,
   });
 
-  // Record the spend whether or not it parsed — the call was billed either way.
+  // Record the spend whether or not it parsed — the call was billed either way,
+  // and it counts against the round cap for the same reason.
   quota.record(cfg.auditor.model, 'audit', now, cfg);
+
 
   if (!result.ok) {
     return {
@@ -202,6 +228,13 @@ async function run({
   }
 
   const parsed = parseVerdict(result.text);
+
+  // Asked before recording, since recording overwrites the fingerprint we are
+  // comparing against.
+  const repeated = Boolean(cfg.audit?.stopOnRepeat !== false)
+    && parsed.verdict === 'block'
+    && rounds.repeats(checkpoint, parsed.findings, { cwd });
+
   const record = {
     checkpoint,
     bundleId: bundle.id,
@@ -213,6 +246,14 @@ async function run({
     threadId: result.threadId,
   };
 
+  const spent = rounds.record(checkpoint, {
+    bundleKey: bundles.keyOf(bundle),
+    findings: parsed.findings,
+    verdict: parsed.verdict,
+    cwd,
+    cfg,
+  });
+
   const dir = ensureDir(auditsDir(cwd));
   writeJson(path.join(dir, `${bundle.id}-${checkpoint}.json`), record);
 
@@ -220,7 +261,51 @@ async function run({
   // The orchestrator does not get a vote on whether its own audit counts.
   let blocked = null;
   let reopened = null;
-  if (parsed.verdict === 'block') {
+  let escalated = null;
+
+  /**
+   * Two ways the loop ends without converging. The cap is the ceiling; the
+   * repeat is what usually gets there first and is the cheaper signal — if the
+   * same findings come back after a genuine re-seal, the fix is not landing
+   * and another round buys another copy of the same paragraph.
+   */
+  const exhausted = spent.used >= spent.max;
+  const notConverging = exhausted || repeated;
+  const proceedAtCap = String(cfg.audit?.onCap || 'proceed') === 'proceed';
+
+  if (parsed.verdict === 'block' && notConverging && proceedAtCap) {
+    /**
+     * The loop has had its rounds and the two models still disagree. Carrying
+     * on is the configured answer — a sixth round rarely settles what five did
+     * not — but it is recorded, never assumed. The findings are kept, the
+     * cycle is marked, and both the dashboard and /duet:brief report that this
+     * phase shipped with them open. "Proceed" must not become "forget".
+     */
+    escalated = rounds.markEscalated(checkpoint, { findings: parsed.findings, cwd });
+
+    const standing = gate.status(cwd);
+    if (standing.blocked && standing.checkpoint === checkpoint) {
+      gate.clear({
+        reason: repeated
+          ? `the ${checkpoint} audit returned identical findings twice after ${spent.used} rounds — the fix is not landing; `
+            + `proceeding with ${parsed.findings.length} finding(s) unresolved`
+          : `round cap (${spent.max}) reached at the ${checkpoint} checkpoint after ${spent.used} audits; `
+            + `proceeding with ${parsed.findings.length} finding(s) unresolved`,
+        cwd,
+      });
+    }
+  } else if (parsed.verdict === 'block' && notConverging) {
+    // onCap is 'halt': leave the gate closed, but say why it stopped early.
+    blocked = gate.raise({
+      bundleId: bundle.id,
+      checkpoint,
+      findings: parsed.findings,
+      summary: repeated
+        ? `identical findings twice running — ${parsed.findings[0]?.summary || 'the fix is not landing'}`
+        : parsed.findings.find((f) => f.severity === 'high')?.summary || 'auditor returned a blocking verdict',
+      cwd,
+    });
+  } else if (parsed.verdict === 'block') {
     blocked = gate.raise({
       bundleId: bundle.id,
       checkpoint,
@@ -267,7 +352,24 @@ async function run({
     cleared = clearance.grant({ checkpoint, verdict: parsed.verdict, findings: parsed.findings, cwd });
   }
 
-  return { skipped: false, ok: true, ...record, blocked, reopened, redirected, cleared, phase: advanced?.phase ?? cycle.phase ?? null };
+  return {
+    skipped: false,
+    ok: true,
+    ...record,
+    blocked,
+    reopened,
+    escalated,
+    repeated,
+    rounds: {
+      used: spent.used,
+      max: spent.max,
+      remaining: Math.max(0, spent.max - spent.used),
+      stoppedEarly: repeated && !exhausted,
+    },
+    redirected,
+    cleared,
+    phase: advanced?.phase ?? cycle.phase ?? null,
+  };
 }
 
 module.exports = { CHECKPOINTS, OUTPUT_CONTRACT, buildPrompt, parseVerdict, auditsDir, run };

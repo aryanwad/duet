@@ -1,5 +1,7 @@
 'use strict';
 
+const crypto = require('node:crypto');
+
 const path = require('node:path');
 const { projectDir, ensureDir, writeJson, readJson } = require('./state.js');
 
@@ -62,6 +64,16 @@ function start({ phase = 'planned', note = '', cwd = process.cwd() } = {}) {
     active: true,
     phase,
     note,
+    /**
+     * A real identity, not a timestamp.
+     *
+     * Other state is scoped to "this cycle" — the audit round counter, the
+     * stop gate's continuation counter — and they compared `startedAt`, which
+     * has millisecond resolution. Stopping a cycle and starting another in the
+     * same millisecond happens roughly 70% of the time in a script, and the
+     * new cycle then inherited the old one's spent rounds.
+     */
+    id: crypto.randomUUID(),
     startedAt: new Date().toISOString(),
     history: [{ phase, at: new Date().toISOString(), note }],
   };

@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="How duet runs a phase from plan approval to commit — the phase machine, the audit loop, and what each hook enforces.">
+<style>
+  /* The artifact platform supplies this skeleton at publish time; a file opened
+     from disk has to carry its own. */
+  :root { color-scheme: light dark; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; font: 14px system-ui, sans-serif; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<title>Duet Field Guide</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+  :root {
+    --bg:          #ecedf1;
+    --surface:     #ffffff;
+    --surface-2:   #f4f5f8;
+    --sunk:        #e4e6ec;
+    --ink:         #171c24;
+    --ink-2:       #4b5563;
+    --ink-3:       #79818f;
+    --line:        #d7dbe3;
+    --line-strong: #b9c0cb;
+
+    --clay:  #9d4a27;
+    --teal:  #0c6a6a;
+    --red:   #ab2129;
+    --amber: #8a5d04;
+    --green: #1b6342;
+
+    --clay-wash:  #f7ede8;
+    --teal-wash:  #e6f1f0;
+    --red-wash:   #fceceb;
+    --amber-wash: #fbf2dd;
+    --green-wash: #e8f2eb;
+
+    --radius: 7px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:          #0f1319;
+      --surface:     #171c23;
+      --surface-2:   #1c222b;
+      --sunk:        #121720;
+      --ink:         #e7eaf0;
+      --ink-2:       #a9b2c0;
+      --ink-3:       #757e8c;
+      --line:        #29303a;
+      --line-strong: #3a424f;
+      --clay:  #e1906a;
+      --teal:  #4fb9b1;
+      --red:   #f08189;
+      --amber: #d8a83f;
+      --green: #6ac598;
+      --clay-wash:  #2a1d16;
+      --teal-wash:  #12262a;
+      --red-wash:   #2c1517;
+      --amber-wash: #29200e;
+      --green-wash: #12271c;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg:          #0f1319;
+    --surface:     #171c23;
+    --surface-2:   #1c222b;
+    --sunk:        #121720;
+    --ink:         #e7eaf0;
+    --ink-2:       #a9b2c0;
+    --ink-3:       #757e8c;
+    --line:        #29303a;
+    --line-strong: #3a424f;
+    --clay:  #e1906a;
+    --teal:  #4fb9b1;
+    --red:   #f08189;
+    --amber: #d8a83f;
+    --green: #6ac598;
+    --clay-wash:  #2a1d16;
+    --teal-wash:  #12262a;
+    --red-wash:   #2c1517;
+    --amber-wash: #29200e;
+    --green-wash: #12271c;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    font-size: 15.5px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 860px; margin: 0 auto; padding-inline: 16px; padding-block: 0 56px; }
+
+  h1, h2, h3 { margin: 0; text-wrap: balance; font-weight: 600; letter-spacing: -.015em; }
+  h1 { font-size: 26px; }
+  h2 { font-size: 19px; margin-top: 44px; padding-top: 18px; border-top: 1px solid var(--line); }
+  h3 { font-size: 15.5px; margin-top: 26px; }
+  p { margin: 12px 0; max-width: 68ch; }
+
+  .mono, code {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  code {
+    font-size: .88em;
+    background: var(--sunk);
+    border-radius: 3px;
+    padding: 1px 5px;
+  }
+
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    overflow-x: auto;
+    margin: 14px 0;
+  }
+
+  pre code { background: none; padding: 0; font-size: 12.5px; line-height: 1.65; }
+
+  .label {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10.5px;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  header.masthead { background: var(--surface); border-bottom: 1px solid var(--line); }
+  header.masthead .wrap { padding-block: 26px 24px; }
+  .lede { font-size: 17px; color: var(--ink-2); margin-top: 10px; max-width: 62ch; }
+  .pairing { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-3); margin-top: 12px; }
+  .pairing .a { color: var(--clay); }
+  .pairing .o { color: var(--teal); }
+
+  .keystone {
+    margin: 22px 0;
+    border: 1px solid var(--line-strong);
+    border-left: 3px solid var(--clay);
+    border-radius: var(--radius);
+    background: var(--clay-wash);
+    padding: 14px 16px;
+  }
+  .keystone p { margin: 0; }
+  .keystone p + p { margin-top: 9px; }
+
+  figure { margin: 26px 0; }
+  figure svg { display: block; width: 100%; max-width: 100%; height: auto; }
+  figcaption { margin-top: 10px; font-size: 13.5px; color: var(--ink-2); max-width: 66ch; }
+
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; border-bottom-color: var(--line-strong); }
+  td.mono { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; white-space: nowrap; }
+  .scroller { overflow-x: auto; }
+
+  ul, ol { max-width: 68ch; padding-left: 22px; }
+  li { margin: 7px 0; }
+
+  .exit { display: flex; gap: 10px; align-items: baseline; padding: 9px 0; border-top: 1px dotted var(--line); }
+  .exit:first-of-type { border-top: 0; }
+  .exit .tag {
+    font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: .07em;
+    text-transform: uppercase; border: 1px solid currentColor; border-radius: 3px;
+    padding: 1.5px 6px; white-space: nowrap; flex: 0 0 auto;
+  }
+  .exit .tag.pass { color: var(--green); }
+  .exit .tag.loop { color: var(--amber); }
+  .exit .tag.ship { color: var(--red); }
+
+  .callout {
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    background: var(--amber-wash);
+    padding: 12px 14px;
+    margin: 18px 0;
+    font-size: 14.5px;
+  }
+  .callout strong { font-weight: 600; }
+
+  @media (max-width: 520px) {
+    h1 { font-size: 22px; }
+    .lede { font-size: 15.5px; }
+  }
+</style>
+</head>
+<body>
+<header class="masthead">
+  <div class="wrap">
+    <span class="label">duet · reference</span>
+    <h1 style="margin-top:6px">Duet Field Guide</h1>
+    <p class="lede">
+      Claude plans and orchestrates. GPT‑6 Astra audits the plan, the delegation and
+      the diff — from the identical sealed context. A phase runs from approval to
+      commit without asking you anything.
+    </p>
+    <div class="pairing">
+      workers: <span class="a">sonnet</span> + <span class="o">gpt‑5.6‑sol</span> ·
+      auditor: <span class="o">gpt‑6‑astra @ high</span> · all on subscription billing
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <div class="keystone">
+    <p><strong>The one idea.</strong> Both models read the same sealed bundle — the brief, the repo state,
+    the plan, and the delegation table — hashed so a verdict can always be traced to the exact input
+    it was formed against. Astra isn't reviewing a diff. It's reviewing the decision.</p>
+    <p>Everything else in the plugin exists to make that review binding rather than advisory:
+    a hook that refuses work, not a prompt that discourages it.</p>
+  </div>
+
+  <h2>How a phase runs</h2>
+
+  <p>
+    You approve a plan. That is the only place duet asks you anything until the commit
+    has landed.
+  </p>
+
+  <figure>
+    <svg viewBox="0 0 980 348" role="img" aria-label="The duet phase machine: you approve the plan, then the cycle moves planned, sealed, audited, building, built, verified, with an audit loop at sealed and at built. The PreToolUse hook refuses edits and dispatch during planned and sealed; the Stop hook refuses the turn ending from planned through built.">
+      <defs>
+        <marker id="fg-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+        </marker>
+        <marker id="fg-arrow-clay" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" style="fill: var(--clay)"/>
+        </marker>
+        <marker id="fg-arrow-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" style="fill: var(--amber)"/>
+        </marker>
+      </defs>
+
+      <!-- human entry -->
+      <text x="90" y="30" text-anchor="middle" font-size="12.5" font-weight="500" style="fill: var(--clay)">you approve the plan</text>
+      <line x1="90" y1="42" x2="90" y2="136" style="stroke: var(--clay)" stroke-width="1.6" marker-end="url(#fg-arrow-clay)"/>
+
+      <!-- audit self-loops -->
+      <path d="M 222 140 C 210 96, 290 96, 278 140" fill="none" style="stroke: var(--amber)" stroke-width="1.6" marker-end="url(#fg-arrow-amber)"/>
+      <text x="250" y="88" text-anchor="middle" font-size="11.5" style="fill: var(--amber)">plan audit</text>
+      <text x="250" y="73" text-anchor="middle" font-size="11" style="fill: var(--amber)">≤ 5 rounds</text>
+
+      <path d="M 702 140 C 690 96, 770 96, 758 140" fill="none" style="stroke: var(--amber)" stroke-width="1.6" marker-end="url(#fg-arrow-amber)"/>
+      <text x="730" y="88" text-anchor="middle" font-size="11.5" style="fill: var(--amber)">pre‑merge audit</text>
+      <text x="730" y="73" text-anchor="middle" font-size="11" style="fill: var(--amber)">≤ 7 rounds</text>
+
+      <!-- rail -->
+      <g font-size="12.5" text-anchor="middle">
+        <rect x="38" y="140" width="104" height="38" rx="5" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="90" y="164">planned</text>
+
+        <rect x="198" y="140" width="104" height="38" rx="5" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="250" y="164">sealed</text>
+
+        <rect x="358" y="140" width="104" height="38" rx="5" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="410" y="164">audited</text>
+
+        <rect x="518" y="140" width="104" height="38" rx="5" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="570" y="164">building</text>
+
+        <rect x="678" y="140" width="104" height="38" rx="5" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="730" y="164">built</text>
+
+        <rect x="838" y="140" width="104" height="38" rx="5" style="fill: var(--green-wash); stroke: var(--green)" stroke-width="1.4"/>
+        <text x="890" y="164" style="fill: var(--green)">verified</text>
+      </g>
+
+      <!-- rail arrows -->
+      <g stroke="currentColor" stroke-width="1.4" marker-end="url(#fg-arrow)">
+        <line x1="142" y1="159" x2="192" y2="159"/>
+        <line x1="302" y1="159" x2="352" y2="159"/>
+        <line x1="462" y1="159" x2="512" y2="159"/>
+        <line x1="622" y1="159" x2="672" y2="159"/>
+        <line x1="782" y1="159" x2="832" y2="159"/>
+      </g>
+      <g font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".72">
+        <text x="167" y="152">seal</text>
+        <text x="327" y="152">pass</text>
+        <text x="487" y="152">dispatch</text>
+        <text x="647" y="152">done</text>
+        <text x="807" y="152">pass</text>
+      </g>
+
+      <!-- human exit -->
+      <line x1="890" y1="178" x2="890" y2="216" style="stroke: var(--clay)" stroke-width="1.6" marker-end="url(#fg-arrow-clay)"/>
+      <text x="890" y="234" text-anchor="middle" font-size="12" font-weight="500" style="fill: var(--clay)">commit</text>
+      <text x="890" y="250" text-anchor="middle" font-size="11.5" style="fill: var(--clay)">→ next phase?</text>
+
+      <!-- hook coverage -->
+      <g style="stroke: var(--red)" stroke-width="1.3" fill="none">
+        <path d="M 38 268 L 38 276 L 302 276 L 302 268"/>
+      </g>
+      <text x="170" y="294" text-anchor="middle" font-size="11.5" style="fill: var(--red)">PreToolUse refuses edits &amp; dispatch</text>
+
+      <g style="stroke: var(--teal)" stroke-width="1.3" fill="none">
+        <path d="M 38 306 L 38 314 L 782 314 L 782 306"/>
+      </g>
+      <text x="410" y="329" text-anchor="middle" font-size="11.5" style="fill: var(--teal)">Stop refuses the turn ending</text>
+    </svg>
+    <figcaption>
+      The two clay arrows are the only human touchpoints. Between them the amber loops run
+      themselves: Astra blocks, Claude fixes and re-seals, Astra re-reads. The red bracket is
+      what makes the plan audit a door rather than a suggestion — before <code>audited</code>,
+      a tool call that would change a file is refused outright.
+    </figcaption>
+  </figure>
+
+  <h2>How you invoke it</h2>
+
+  <p>
+    One command does the whole arc. The others exist for when you want a single piece of it.
+  </p>
+
+  <pre><code>/duet:wrap [path/to/plan.md]     ← the one you'll use</code></pre>
+
+  <p>
+    Use it after <code>brainstorming</code> and <code>writing-plans</code> have produced a plan and
+    you've approved it. duet does not re-plan; re-planning would throw away the better plan and
+    produce a worse one. <code>/duet:run "&lt;what you want&gt;"</code> is the same arc when no
+    planning skill was involved.
+  </p>
+
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Command</th><th>What it's for</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">/duet:wrap</td><td>Run an approved plan end to end. The main entry point.</td></tr>
+        <tr><td class="mono">/duet:run</td><td>Same, but plans first. For when no planning skill was used.</td></tr>
+        <tr><td class="mono">/duet:brief</td><td>Catch up across every project — what moved, what Astra flagged, what needs you.</td></tr>
+        <tr><td class="mono">/duet:audit</td><td>Fire one checkpoint by hand: <code>plan</code>, <code>batch</code>, <code>feature</code>, <code>premerge</code>.</td></tr>
+        <tr><td class="mono">/duet:bundle</td><td>Seal a context bundle, or render the one both models read.</td></tr>
+        <tr><td class="mono">/duet:dispatch</td><td>Route and run tickets across both families.</td></tr>
+        <tr><td class="mono">/duet:commit</td><td>Review the diff, then commit and push. Refused without clearance.</td></tr>
+        <tr><td class="mono">/duet:gate</td><td>Inspect a block, or clear it with a recorded reason.</td></tr>
+        <tr><td class="mono">/duet:phase</td><td>Show or move the cycle by hand.</td></tr>
+        <tr><td class="mono">/duet:status</td><td>Mode, Codex readiness, current bundle, remaining quota.</td></tr>
+        <tr><td class="mono">/duet:setup</td><td>First-run check: Codex installed, logged in, billing to the subscription.</td></tr>
+        <tr><td class="mono">/duet:mode</td><td>Switch which checkpoints fire automatically.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>The audit loop, and its three exits</h2>
+
+  <p>
+    This is the part that changed most recently, and the part worth understanding, because
+    it is where the tokens used to go.
+  </p>
+
+  <figure>
+    <svg viewBox="0 0 900 336" role="img" aria-label="An audit round has three exits: a passing verdict opens the gate and the phase advances; a blocking verdict with new findings loops back through fix and re-seal; and a blocking verdict that repeats itself or exhausts the round cap opens the gate anyway and records the findings as unresolved.">
+      <defs>
+        <marker id="lp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+        </marker>
+        <marker id="lp-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" style="fill: var(--green)"/>
+        </marker>
+        <marker id="lp-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" style="fill: var(--amber)"/>
+        </marker>
+        <marker id="lp-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" style="fill: var(--red)"/>
+        </marker>
+      </defs>
+
+      <!-- the sealed bundle -->
+      <rect x="30" y="140" width="128" height="52" rx="5" style="fill: var(--surface-2)" stroke="currentColor" stroke-width="1.2"/>
+      <text x="94" y="162" text-anchor="middle" font-size="12.5">sealed bundle</text>
+      <text x="94" y="179" text-anchor="middle" font-size="10.5" opacity=".7">brief · plan · tickets</text>
+
+      <line x1="158" y1="166" x2="210" y2="166" stroke="currentColor" stroke-width="1.4" marker-end="url(#lp-arrow)"/>
+
+      <!-- astra -->
+      <rect x="210" y="138" width="124" height="56" rx="5" style="fill: var(--teal-wash); stroke: var(--teal)" stroke-width="1.4"/>
+      <text x="272" y="160" text-anchor="middle" font-size="12.5" style="fill: var(--teal)">Astra audits</text>
+      <text x="272" y="178" text-anchor="middle" font-size="10.5" style="fill: var(--teal)">read-only sandbox</text>
+
+      <!-- fan out -->
+      <path d="M 334 152 C 400 152, 410 66, 470 66" fill="none" style="stroke: var(--green)" stroke-width="1.5" marker-end="url(#lp-green)"/>
+      <path d="M 334 166 C 400 166, 410 166, 470 166" fill="none" style="stroke: var(--amber)" stroke-width="1.5" marker-end="url(#lp-amber)"/>
+      <path d="M 334 180 C 400 180, 410 268, 470 268" fill="none" style="stroke: var(--red)" stroke-width="1.5" marker-end="url(#lp-red)"/>
+
+      <!-- exit 1: pass -->
+      <rect x="470" y="44" width="400" height="46" rx="5" style="fill: var(--green-wash); stroke: var(--green)" stroke-width="1.3"/>
+      <text x="486" y="64" font-size="12.5" font-weight="500" style="fill: var(--green)">pass / concerns</text>
+      <text x="486" y="80" font-size="11" style="fill: var(--green)">gate opens · phase advances · clearance granted</text>
+
+      <!-- exit 2: loop -->
+      <rect x="470" y="142" width="400" height="48" rx="5" style="fill: var(--amber-wash); stroke: var(--amber)" stroke-width="1.3"/>
+      <text x="486" y="162" font-size="12.5" font-weight="500" style="fill: var(--amber)">block, findings are new</text>
+      <text x="486" y="178" font-size="11" style="fill: var(--amber)">Claude fixes → re-seals → audits again</text>
+
+      <!-- loop back -->
+      <path d="M 670 190 C 670 226, 272 234, 272 196" fill="none" style="stroke: var(--amber)" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#lp-amber)"/>
+      <text x="196" y="256" text-anchor="start" font-size="10.5" style="fill: var(--amber)">a round counts only if the bundle changed</text>
+
+      <!-- exit 3: ship -->
+      <rect x="470" y="246" width="400" height="60" rx="5" style="fill: var(--red-wash); stroke: var(--red)" stroke-width="1.3"/>
+      <text x="486" y="266" font-size="12.5" font-weight="500" style="fill: var(--red)">same findings twice, or cap reached</text>
+      <text x="486" y="282" font-size="11" style="fill: var(--red)">gate opens anyway · findings recorded as unresolved</text>
+      <text x="486" y="297" font-size="11" style="fill: var(--red)">dashboard and /duet:brief both lead with it</text>
+    </svg>
+    <figcaption>
+      The dashed return is the step that used to be missing. The plan lives <em>inside</em> the sealed
+      bundle, so editing the plan file changed nothing the auditor read — and the loop ran seven to ten
+      times collecting the same findings. duet now refuses an audit of content it has already audited.
+    </figcaption>
+  </figure>
+
+  <div class="exit"><span class="tag pass">exit 1</span><div><strong>It converges.</strong> Usually round 1 or 2. The gate opens, the phase advances, and on a code checkpoint the exact diff is cleared for commit.</div></div>
+  <div class="exit"><span class="tag loop">exit 2</span><div><strong>It stops converging.</strong> Identical findings twice running means the fix isn't landing, so a third round would buy the same paragraph again. The loop ends there — this is what usually ends it.</div></div>
+  <div class="exit"><span class="tag ship">exit 3</span><div><strong>It runs out of rounds.</strong> 5 for the plan, 7 for the final review. Work proceeds with the findings on the record. Set <code>audit.onCap</code> to <code>halt</code> if you'd rather it stopped.</div></div>
+
+  <div class="callout">
+    <strong>Cost to keep in mind.</strong> A phase that fights through both checkpoints can want
+    5 + 7 = 12 auditor calls, against a rolling budget of 24 per 5 hours with 2 held in reserve.
+    Two contentious phases will exhaust the window — <code>duet quota show</code> is where to look
+    when an audit starts getting skipped mid-run.
+  </div>
+
+  <h2>What enforces what</h2>
+
+  <p>
+    Six hook events. None of them are advice; each one either allows a thing or refuses it,
+    in a separate process that Claude does not control.
+  </p>
+
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Event</th><th>Does</th><th>Refuses when</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">PreToolUse</td><td>Inspects every tool call that could change something</td><td>The cycle hasn't reached <code>audited</code>, or a blocking verdict stands</td></tr>
+        <tr><td class="mono">Stop</td><td>Decides whether the turn may end</td><td>A cycle is mid-phase and has a defined next step</td></tr>
+        <tr><td class="mono">PostToolUse</td><td>Starts a cycle when an approved plan is written</td><td>—</td></tr>
+        <tr><td class="mono">SessionStart</td><td>Surfaces gate readiness, registers the project for the dashboard</td><td>—</td></tr>
+        <tr><td class="mono">SubagentStart</td><td>Logs the dispatch to <code>.duet/activity.jsonl</code></td><td>—</td></tr>
+        <tr><td class="mono">SubagentStop</td><td>Closes the log entry, trims the log</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Why the Stop hook can't trap you</h3>
+
+  <p>
+    It holds the turn open so a phase doesn't end halfway. Four things make sure it lets go:
+  </p>
+
+  <ul>
+    <li><strong>A ceiling.</strong> Three refusals at the same point and it hands the turn back.</li>
+    <li><strong>Surrender sticks.</strong> Once it has given up at a point it stays given up until something changes.</li>
+    <li><strong>Progress resets the budget.</strong> The count is per <em>state</em>, not per session, so a long phase is never punished for being long.</li>
+    <li><strong>It stands aside on escalation.</strong> A closed gate with no rounds left means duet decided it wants you — holding the turn there would trap you in the one case it built to reach you.</li>
+  </ul>
+
+  <p>Turn it off entirely with <code>duet config set audit.autoContinue false</code>.</p>
+
+  <h2>Where the state lives</h2>
+
+  <p>
+    Two places, and the split matters: anything per-project sits in the repo where you can read it,
+    and only the cross-project ledger is global.
+  </p>
+
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Path</th><th>Holds</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">&lt;repo&gt;/.duet/phase.json</td><td>The cycle and its history</td></tr>
+        <tr><td class="mono">&lt;repo&gt;/.duet/bundles/</td><td>Every sealed bundle, with lineage</td></tr>
+        <tr><td class="mono">&lt;repo&gt;/.duet/gate.json</td><td>The standing block, if any</td></tr>
+        <tr><td class="mono">&lt;repo&gt;/.duet/gate-history.json</td><td>Every block and how it ended</td></tr>
+        <tr><td class="mono">&lt;repo&gt;/.duet/audit-rounds.json</td><td>Rounds spent, verdict fingerprints, escalations</td></tr>
+        <tr><td class="mono">&lt;repo&gt;/.duet/stop-gate.json</td><td>Continuation counter for the Stop hook</td></tr>
+        <tr><td class="mono">&lt;repo&gt;/.duet/activity.jsonl</td><td>Which subagents ran, and when</td></tr>
+        <tr><td class="mono">~/.claude/duet/config.json</td><td>Settings</td></tr>
+        <tr><td class="mono">~/.claude/duet/quota.json</td><td>The rolling 5-hour ledger</td></tr>
+        <tr><td class="mono">~/.claude/duet/projects.json</td><td>Registered projects for the dashboard</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    <code>.duet/</code> is gitignored, so cycle state does not travel with a clone. A project
+    blocked on one machine arrives on another with an open gate — one machine per cycle.
+  </p>
+
+  <h2>Settings worth knowing</h2>
+
+  <pre><code>duet config set audit.maxRounds 5          # plan-audit cap
+duet config set audit.maxRoundsByCheckpoint.premerge 7
+duet config set audit.onCap proceed        # or: halt
+duet config set audit.stopOnRepeat true    # stop on identical findings
+duet config set audit.autoContinue true    # Stop hook holds the turn
+duet config set audit.maxContinues 3
+duet config mode plan-premerge             # which checkpoints fire</code></pre>
+
+  <h3>The agents</h3>
+
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Agent</th><th>Model</th><th>Gated</th><th>For</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">duet-prior-art</td><td class="mono">opus</td><td>no</td><td>Deep research on a domain — how it works, what’s been built, where attempts stall. Called whenever planning needs more than it has.</td></tr>
+        <tr><td class="mono">duet-researcher</td><td class="mono">sonnet</td><td>no</td><td>Web research during planning</td></tr>
+        <tr><td class="mono">duet-scout</td><td class="mono">sonnet</td><td>no</td><td>Reading the codebase without filling your context</td></tr>
+        <tr><td class="mono">duet-summarizer</td><td class="mono">sonnet</td><td>no</td><td>Condensing findings</td></tr>
+        <tr><td class="mono">duet-worker</td><td class="mono">sonnet</td><td><strong>yes</strong></td><td>Doing the work on Anthropic tickets</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    The four read-only agents are exempt from the gate on purpose: research during planning
+    is exactly the work that should happen <em>before</em> a plan is sealed, and a gate that
+    blocked it would push planning toward guesswork.
+  </p>
+
+  <h2>If something looks wrong</h2>
+
+  <ul>
+    <li><code>duet doctor --probe</code> — makes two real calls and tells you whether Codex is billing your ChatGPT subscription or an API key. Run it before trusting any setup; it's what caught an invented CLI flag that silently broke every audit.</li>
+    <li><code>duet status</code> — mode, current bundle, remaining quota.</li>
+    <li><code>duet gate show</code> — what's blocking and why.</li>
+    <li><code>duet dash</code> — every registered project at once.</li>
+    <li><code>duet bundle show</code> — the exact text both models read.</li>
+  </ul>
+
+</main>
+</body>
+</html>

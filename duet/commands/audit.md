@@ -37,9 +37,29 @@ session; burning it on a mid-session check is usually the wrong trade.
    something first — and where you disagree, give the reason. A finding you
    rebut with evidence is a good outcome; a finding you quietly drop is not.
 
-5. If the verdict is `block`, the gate closes and dispatch is refused. Stop,
-   show the user the blocking findings, and let them decide. Do not clear the
-   gate yourself — see `/duet:gate`.
+5. If the verdict is `block`, the gate closes and dispatch is refused. **Fix
+   and re-audit rather than stopping** — that is the intended way past a block,
+   and it is the loop `/duet:wrap` and `/duet:run` drive automatically:
+
+   ```bash
+   node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" bundle reseal --plan '{...}' --note "addressed: <finding>"
+   node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" audit <checkpoint>
+   ```
+
+   **Re-sealing is not optional.** The plan and ticket table live inside the
+   sealed bundle, so editing the plan file changes nothing the auditor reads;
+   without a re-seal the next audit returns the same findings. duet refuses an
+   audit of content it has already audited and says so.
+
+   Do not clear the gate yourself to get past a finding — `duet gate clear`
+   records a reason that is supposed to mean something, and using it in place
+   of a fix corrupts the one record that does. A passing re-audit reopens the
+   gate on its own, recorded as addressed rather than overridden.
+
+   The round cap (5 per checkpoint per cycle, `audit.maxRounds`) ends the loop
+   if it does not converge: duet opens the gate itself, keeps the outstanding
+   findings on the record, and prints `PROCEEDING PAST THE CAP`. Report that
+   prominently — it is the one outcome the user will care about most.
 
 6. Redirects are **applied automatically** and the bundle is re-sealed under a
    new hash. Show the user what moved, from which model to which, and why. If

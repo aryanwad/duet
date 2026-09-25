@@ -6,6 +6,7 @@ const { execFileSync } = require('node:child_process');
 const registry = require('./registry.js');
 const activity = require('./activity.js');
 const config = require('./config.js');
+const rounds = require('./rounds.js');
 const quota = require('./quota.js');
 const { readJson } = require('./state.js');
 
@@ -51,7 +52,15 @@ function lastTouched(duetDir) {
  * What is this project waiting on? The single most useful field on the whole
  * dashboard, because it is the one that tells you where to go next.
  */
-function waitingOn({ phase, gate, clearance, bundle }) {
+function waitingOn({ phase, gate, clearance, bundle, escalations = [] }) {
+  if (escalations.length) {
+    const worst = escalations[0];
+    return {
+      what: 'you',
+      why: `the ${worst.checkpoint} audit hit its round cap and work proceeded with ${worst.escalated.outstanding.length} finding(s) unresolved`,
+      urgency: 'blocked',
+    };
+  }
   if (gate?.blocked) {
     return { what: 'you', why: `${gate.checkpoint} audit blocked: ${gate.summary}`, urgency: 'blocked' };
   }
@@ -134,9 +143,16 @@ function project(entry) {
       .sort((x, y) => String(y.at).localeCompare(String(x.at)));
   } catch { /* none yet */ }
 
+  const roundState = (() => {
+    try { return rounds.summary({ cwd: root, cfg: config.load() }); } catch { return []; }
+  })();
+  const escalations = roundState.filter((r) => r.escalated);
+
   return {
     ...entry,
     readable: true,
+    rounds: roundState,
+    escalations,
     phase: phase?.active ? phase.phase : null,
     phaseActive: Boolean(phase?.active),
     phaseHistory: (phase?.history || []).map((h) => ({ phase: h.phase, at: h.at, note: h.note || null, forced: Boolean(h.forcedFrom) })),
@@ -153,7 +169,7 @@ function project(entry) {
       lastCommitAt: git(['log', '-1', '--format=%cI'], root) || null,
     },
     lastTouched: lastTouched(duetDir),
-    waitingOn: waitingOn({ phase, gate, clearance, bundle }),
+    waitingOn: waitingOn({ phase, gate, clearance, bundle, escalations }),
   };
 }
 
@@ -182,6 +198,7 @@ function collect({ now = Date.now() } = {}) {
       blocked: projects.filter((p) => p.gate?.blocked).length,
       unreadable: projects.filter((p) => !p.readable).length,
       needsYou: projects.filter((p) => p.waitingOn?.what === 'you').length,
+      shippedWithFindings: projects.filter((p) => (p.escalations || []).length).length,
     },
   };
 }
