@@ -96,7 +96,7 @@ function nextAction({ cwd = process.cwd(), cfg } = {}) {
 
   if (g.blocked) {
     const checkpoint = g.checkpoint || 'plan';
-    const spent = rounds.check(checkpoint, { cwd, cfg });
+    const spent = rounds.check(g.scope || checkpoint, { cwd, cfg });
 
     // Out of rounds with the gate still shut means the loop escalated to a
     // person on purpose. Holding the turn open here would trap the user in

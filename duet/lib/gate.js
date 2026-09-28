@@ -19,12 +19,15 @@ function gatePath(cwd = process.cwd()) {
   return path.join(projectDir(cwd), 'gate.json');
 }
 
-function raise({ bundleId, checkpoint, findings = [], summary = '', cwd = process.cwd() }) {
+function raise({ bundleId, checkpoint, scope = null, task = null, findings = [], summary = '', cwd = process.cwd() }) {
   ensureDir(projectDir(cwd));
   const record = {
     blocked: true,
     bundleId,
     checkpoint,
+    // Which budget this block belongs to — a feature review is scoped per task.
+    scope: scope || checkpoint,
+    task,
     at: new Date().toISOString(),
     summary,
     findings: findings.filter((f) => f && f.severity === 'high'),

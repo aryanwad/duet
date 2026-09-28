@@ -94,6 +94,12 @@ function repoSnapshot(cwd = process.cwd(), { base = null } = {}) {
 
   const snapshot = {
     tracked: true,
+    /**
+     * A hash of the working tree at seal time. Lets a later code review ask
+     * "is this bundle still describing the tree I'm about to audit?" without
+     * re-hashing everything, and without re-sealing when nothing moved.
+     */
+    fingerprint: require('./clearance.js').fingerprint(cwd).hash,
     root,
     branch: git(['rev-parse', '--abbrev-ref', 'HEAD'], cwd),
     head: git(['rev-parse', 'HEAD'], cwd),
@@ -187,6 +193,13 @@ function reseal({
   constraints = undefined,
   note = '',
   bundleId = null,
+  /**
+   * Re-seal with nothing changed but a fresh repo snapshot. A code review
+   * reads the working tree, so its bundle has to carry the *current* diff —
+   * otherwise the auditor is handed a description of a diff that no longer
+   * exists, which is worse than refusing the audit because it fails quietly.
+   */
+  refreshRepo = false,
   cwd = process.cwd(),
 } = {}) {
   const previous = load(bundleId, cwd);
@@ -195,6 +208,7 @@ function reseal({
   }
 
   const changed = [];
+  if (refreshRepo) changed.push('repo snapshot');
   if (plan !== undefined) changed.push('plan');
   if (tickets !== undefined) changed.push('tickets');
   if (brief !== undefined) changed.push('brief');
@@ -225,7 +239,8 @@ function reseal({
   // this would always claim success. The caller believes it fixed something;
   // if it did not, saying so here beats letting the next audit discover it at
   // the price of an auditor call.
-  const unchanged = keyOf(next) === keyOf(previous);
+  // A snapshot refresh legitimately changes nothing in the substance.
+  const unchanged = !refreshRepo && keyOf(next) === keyOf(previous);
   return { resealed: !unchanged, unchanged, bundle: next, previousId: previous.id, changed };
 }
 

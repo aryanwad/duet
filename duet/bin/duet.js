@@ -145,6 +145,7 @@ const COMMANDS = {
     const json = Boolean(flags.json);
     const result = await audit.run({
       checkpoint: positional[1] || 'plan',
+      task: flags.task && flags.task !== true ? flags.task : null,
       bundleId: flags.bundle && flags.bundle !== true ? flags.bundle : null,
       extra: readMaybeFile(flags.extra) || '',
       force: Boolean(flags.force),
@@ -191,7 +192,7 @@ const COMMANDS = {
     const lines = [
       `verdict: ${result.verdict.toUpperCase()}  (${result.checkpoint}, ${result.auditor.model} @ ${result.auditor.effort})`,
       `bundle:  ${result.bundleId}`,
-      `round:   ${result.rounds.used} of ${result.rounds.max}${result.rounds.remaining ? ` (${result.rounds.remaining} left this cycle)` : ' — cap reached'}`,
+      `round:   ${result.rounds.used} of ${result.rounds.max}${result.task ? ` for ${result.task}` : ''}${result.rounds.remaining ? ` (${result.rounds.remaining} left)` : ' — cap reached'}`,
       '',
       result.text,
     ];
@@ -711,7 +712,8 @@ async function main() {
   duet bundle verify [id]          confirm a sealed bundle was not edited
   duet bundle reseal [--plan @plan.json] [--tickets @t.json] [--note "..."]
                                    re-seal after fixing what an audit flagged
-  duet audit <plan|batch|feature|premerge> [--force] [--automatic] [--extra "..."] [--no-apply]
+  duet audit <plan|batch|feature|premerge> [--task "Task 26"] [--force] [--extra "..."]
+                                   --task scopes a feature review's budget to that task
   duet dash [--json] [--html <file>]   every registered project in one view
   duet projects list | add <path> | remove <path>
   duet phase start [planned] | show | set <phase> [--force] | stop

@@ -80,12 +80,31 @@ function entry(checkpoint, cwd = process.cwd()) {
   return state.checkpoints[checkpoint] || { used: 0, keys: [], lastKey: null, capReached: false };
 }
 
-/** The configured cap for a checkpoint. */
-function maxFor(checkpoint, cfg) {
+/**
+ * A scope is what the budget belongs to.
+ *
+ * Plan and pre-merge audits judge the whole cycle, so the cycle is the right
+ * unit. A feature review judges one task's diff, and counting those against a
+ * single cycle-wide budget meant a thirty-task phase spent its rounds on the
+ * first few and gave the rest unenforced reviews — the exact opposite of what
+ * a cap is for. So a per-task checkpoint carries its task in the scope.
+ */
+function scopeFor(checkpoint, task) {
+  return task ? `${checkpoint}:${String(task).trim()}` : checkpoint;
+}
+
+/** The checkpoint a scope belongs to, for looking up its cap. */
+function checkpointOf(scope) {
+  const i = String(scope).indexOf(':');
+  return i === -1 ? scope : String(scope).slice(0, i);
+}
+
+/** The configured cap for a scope. */
+function maxFor(scope, cfg) {
   const audit = cfg?.audit || {};
   const override = audit.maxRoundsByCheckpoint || {};
-  const value = override[checkpoint] ?? audit.maxRounds;
-  return Number.isFinite(value) && value > 0 ? value : 5;
+  const value = override[checkpointOf(scope)] ?? audit.maxRounds;
+  return Number.isFinite(value) && value > 0 ? value : 3;
 }
 
 /**
@@ -200,4 +219,4 @@ function reset(cwd = process.cwd()) {
   return save({ cycle: cycleKey(cwd), checkpoints: {} }, cwd);
 }
 
-module.exports = { FILE, roundsPath, cycleKey, fingerprint, load, save, entry, maxFor, check, repeats, record, markEscalated, summary, reset };
+module.exports = { FILE, roundsPath, cycleKey, fingerprint, scopeFor, checkpointOf, load, save, entry, maxFor, check, repeats, record, markEscalated, summary, reset };

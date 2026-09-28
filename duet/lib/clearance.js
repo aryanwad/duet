@@ -39,11 +39,42 @@ function fingerprint(cwd = process.cwd()) {
   const head = git(['rev-parse', 'HEAD'], cwd).trim();
   const staged = git(['diff', '--cached'], cwd);
   const unstaged = git(['diff'], cwd);
-  const status = git(['status', '--porcelain'], cwd);
+  /**
+   * duet's own state lives in `.duet/` inside the repo. Most projects gitignore
+   * it, and `--exclude-standard` then hides it — but not every project does,
+   * and a fingerprint that moves every time duet writes its own bookkeeping
+   * would invalidate a commit clearance the moment an audit was recorded, and
+   * would let an unchanged diff be re-reviewed forever. Excluded explicitly so
+   * it does not depend on the project's .gitignore.
+   */
+  const mine = (line) => !/(^|\s|\.\/)\.duet[\/]/.test(line);
+  const status = git(['status', '--porcelain'], cwd)
+    .split('\n')
+    .filter(Boolean)
+    .filter(mine)
+    .join('\n');
+
+  /**
+   * Untracked files, by content.
+   *
+   * `git diff` ignores them entirely and `status --porcelain` only ever says
+   * `?? name`, so without this an untracked file could be rewritten freely and
+   * the fingerprint would not move. Two consequences, both bad: a clearance
+   * granted for one version of a new file silently covered every later
+   * version, and a fix to a brand-new file could not be re-reviewed, because
+   * the review looked like a repeat of one already done.
+   */
+  const untracked = git(['ls-files', '--others', '--exclude-standard'], cwd)
+    .split('\n')
+    .filter(Boolean)
+    .filter((file) => !file.startsWith('.duet/'))
+    .sort()
+    .map((file) => `${file} ${git(['hash-object', '--', file], cwd).trim()}`)
+    .join('\n');
 
   const hash = crypto
     .createHash('sha256')
-    .update(`${head}\n${staged}\n${unstaged}\n${status}`)
+    .update(`${head}\n${staged}\n${unstaged}\n${status}\n${untracked}`)
     .digest('hex');
 
   const files = status.split('\n').filter(Boolean).map((l) => l.slice(3));

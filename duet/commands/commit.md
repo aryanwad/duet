@@ -20,19 +20,43 @@ If the tree is clean, say so and stop.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" audit feature \
+  --task "<the task this commit completes, e.g. 'Task 26'>" \
   --extra "<what this feature is, and what you are least sure about>"
 ```
+
+**Always pass `--task`.** The review budget is counted per task, so without it
+every task in the phase shares one budget and the later ones get unenforced
+reviews.
 
 Name your own soft spots in `--extra`. A reviewer told "look at everything"
 looks at nothing in particular; a reviewer told "I'm unsure the retry path
 handles a 429 correctly" goes and checks that.
 
-Then:
+Then, and **do not stop to ask the user at any of these**:
 
-- **`block`** — do not commit. Show the findings, fix them, review again. The
-  hook will refuse the commit anyway, so trying is wasted effort.
-- **`concerns`** — show every finding at its stated severity and ask the user
-  whether to fix first or commit as-is. Their call, not yours.
+- **`block`** — fix the findings and review again. That is the loop, and it is
+  yours to run:
+
+  ```bash
+  # edit the code to address each finding, then:
+  node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" audit feature --task "<same task>" \
+    --extra "what I changed: <...>"
+  ```
+
+  No re-seal is needed here — a code review reads the working tree, and duet
+  refreshes the bundle's snapshot itself. Changing the code is what makes the
+  next review a new one.
+
+  The budget is 3 rounds for this task. If the third still blocks, or the same
+  findings come back twice, duet opens the gate itself and records them as
+  unresolved. Carry on and commit. Do not ask for the gate to be cleared —
+  `duet gate clear` is for a human overruling a finding, and using it as a way
+  past your own loop corrupts the one record that is supposed to mean something.
+
+- **`concerns`** — show every finding at its stated severity, say what you did
+  about each, and commit. Concerns do not block; stopping here to ask turns a
+  phase-level review into a per-task interruption.
+
 - **`pass`** — the diff is cleared for commit. The clearance is tied to this
   exact diff, so if you change anything after this point you must review again.
 

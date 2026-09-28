@@ -10,6 +10,19 @@ const redirect = require('./redirect.js');
 const phase = require('./phase.js');
 const clearance = require('./clearance.js');
 const rounds = require('./rounds.js');
+
+/**
+ * Checkpoints that judge the working tree rather than the plan.
+ *
+ * The distinction matters twice below: these read the diff, so their bundle
+ * must carry a current repo snapshot, and their "have I already audited this?"
+ * key must include the diff — otherwise fixing the code and re-reviewing looks
+ * identical to re-reviewing unchanged text, and the review is refused. That
+ * deadlocked every task: Claude fixed the finding, tried to re-audit, was told
+ * the content was already audited, and had no legal move left but to ask a
+ * human to clear the gate.
+ */
+const CODE_CHECKPOINTS = Object.freeze(['feature', 'premerge']);
 const { projectDir, ensureDir, writeJson } = require('./state.js');
 
 /**
@@ -141,8 +154,23 @@ function auditsDir(cwd) {
  * `force` bypasses the reserve check but never the mode check — if you set
  * on-demand, an automatic checkpoint stays silent.
  */
+/**
+ * What this audit is judging, hashed.
+ *
+ * Plan audits are identified by the plan's substance. Code reviews are
+ * identified by that plus the actual working tree, because that is what the
+ * auditor reads.
+ */
+function auditKey(checkpoint, bundle, cwd) {
+  const base = bundles.keyOf(bundle);
+  if (!CODE_CHECKPOINTS.includes(checkpoint)) return base;
+  return bundles.hashContent({ base, tree: clearance.fingerprint(cwd).hash });
+}
+
 async function run({
   checkpoint = 'plan',
+  /** Which task this review belongs to. Scopes the round budget per task. */
+  task = null,
   bundleId = null,
   extra = '',
   cwd = process.cwd(),
@@ -160,9 +188,24 @@ async function run({
   // on external tooling, so a tampered bundle is never masked by an unrelated
   // "codex not installed" message — the integrity failure is the more serious
   // of the two and has to be the one the user sees.
-  const bundle = bundles.load(bundleId, cwd);
+  let bundle = bundles.load(bundleId, cwd);
   if (!bundle) {
     return { skipped: true, reason: 'no context bundle found — run /duet:bundle first' };
+  }
+
+  /**
+   * A code review must see the tree as it is now. Doing this here rather than
+   * telling Claude to re-seal first is deliberate: a forgotten re-seal would
+   * not fail, it would hand the auditor a description of a diff that no longer
+   * exists — wrong quietly, which is the worst way to be wrong.
+   */
+  if (CODE_CHECKPOINTS.includes(checkpoint)) {
+    const live = clearance.fingerprint(cwd).hash;
+    const sealed = bundle.content?.repo?.fingerprint || null;
+    if (sealed !== live) {
+      const refreshed = bundles.reseal({ refreshRepo: true, note: `refreshed for the ${checkpoint} review`, cwd });
+      bundle = refreshed.bundle;
+    }
   }
 
   const integrity = bundles.verify(bundle);
@@ -184,7 +227,8 @@ async function run({
    * `force` overrides both, because a deliberate human "do it anyway" should
    * always be available — but it has to be deliberate.
    */
-  const round = rounds.check(checkpoint, { bundleKey: bundles.keyOf(bundle), cwd, cfg });
+  const scope = rounds.scopeFor(checkpoint, task);
+  const round = rounds.check(scope, { bundleKey: auditKey(checkpoint, bundle, cwd), cwd, cfg });
   if (!round.ok && !force) {
     return {
       skipped: true,
@@ -233,7 +277,7 @@ async function run({
   // comparing against.
   const repeated = Boolean(cfg.audit?.stopOnRepeat !== false)
     && parsed.verdict === 'block'
-    && rounds.repeats(checkpoint, parsed.findings, { cwd });
+    && rounds.repeats(scope, parsed.findings, { cwd });
 
   const record = {
     checkpoint,
@@ -246,8 +290,8 @@ async function run({
     threadId: result.threadId,
   };
 
-  const spent = rounds.record(checkpoint, {
-    bundleKey: bundles.keyOf(bundle),
+  const spent = rounds.record(scope, {
+    bundleKey: auditKey(checkpoint, bundle, cwd),
     findings: parsed.findings,
     verdict: parsed.verdict,
     cwd,
@@ -281,7 +325,7 @@ async function run({
      * cycle is marked, and both the dashboard and /duet:brief report that this
      * phase shipped with them open. "Proceed" must not become "forget".
      */
-    escalated = rounds.markEscalated(checkpoint, { findings: parsed.findings, cwd });
+    escalated = rounds.markEscalated(scope, { findings: parsed.findings, cwd });
 
     const standing = gate.status(cwd);
     if (standing.blocked && standing.checkpoint === checkpoint) {
@@ -299,6 +343,8 @@ async function run({
     blocked = gate.raise({
       bundleId: bundle.id,
       checkpoint,
+      scope,
+      task,
       findings: parsed.findings,
       summary: repeated
         ? `identical findings twice running — ${parsed.findings[0]?.summary || 'the fix is not landing'}`
@@ -309,6 +355,8 @@ async function run({
     blocked = gate.raise({
       bundleId: bundle.id,
       checkpoint,
+      scope,
+      task,
       findings: parsed.findings,
       summary: parsed.findings.find((f) => f.severity === 'high')?.summary || 'auditor returned a blocking verdict',
       cwd,
@@ -356,6 +404,8 @@ async function run({
     skipped: false,
     ok: true,
     ...record,
+    scope,
+    task,
     blocked,
     reopened,
     escalated,
@@ -372,4 +422,4 @@ async function run({
   };
 }
 
-module.exports = { CHECKPOINTS, OUTPUT_CONTRACT, buildPrompt, parseVerdict, auditsDir, run };
+module.exports = { CHECKPOINTS, CODE_CHECKPOINTS, auditKey, OUTPUT_CONTRACT, buildPrompt, parseVerdict, auditsDir, run };

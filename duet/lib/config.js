@@ -88,12 +88,17 @@ const DEFAULTS = Object.freeze({
    * an unresolved finding.
    */
   audit: {
-    maxRounds: 5,
+    maxRounds: 3,
 
     /**
      * The final review gets more rope than the plan audit. By pre-merge the
      * work exists, the findings are concrete, and each round is a real edit
      * against a real diff — the argument is more likely to be worth having.
+     */
+    /**
+     * `feature` is counted PER TASK, not per cycle — see `scope` in rounds.js.
+     * A thirty-task phase sharing one budget meant the later tasks got
+     * unenforced reviews, which is the opposite of what a cap is for.
      */
     maxRoundsByCheckpoint: { premerge: 7 },
 

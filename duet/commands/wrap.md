@@ -136,6 +136,12 @@ final gate and the reason that call is worth making.
 
 Work the whole phase. Do not stop between tickets to check in.
 
+**At each feature boundary, run `/duet:commit` and drive its review loop
+yourself.** Pass `--task` so the budget is that task's own 3 rounds rather than
+one shared across the phase. A blocking feature review is your work to fix and
+re-review, exactly like the plan loop in step 4 — it is never a reason to ask
+the user to clear the gate.
+
 ## 7. The pre-commit loop
 
 ```bash

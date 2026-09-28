@@ -5,6 +5,7 @@ const assert = require('node:assert');
 const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 
 /**
  * Termination properties of the fix-and-re-audit loop.
@@ -37,9 +38,23 @@ test.beforeEach(() => quota.reset());
 
 /** A fresh project directory per test — these all write to `<cwd>/.duet`. */
 let seq = 0;
+
+/**
+ * A real git repo, because a code review's "has anything changed?" question is
+ * answered from git. In a plain directory every git call fails, the tree
+ * fingerprint is a hash of four empty strings, and the tests pass while
+ * exercising none of the behaviour they claim to.
+ */
 function project() {
   const dir = path.join(tmp, `p${seq += 1}`);
   fs.mkdirSync(dir, { recursive: true });
+  const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' });
+  git('init', '-q');
+  git('config', 'user.email', 't@example.invalid');
+  git('config', 'user.name', 'test');
+  fs.writeFileSync(path.join(dir, 'seed.txt'), 'seed\n');
+  git('add', '.');
+  git('commit', '-qm', 'seed');
   return dir;
 }
 
@@ -368,14 +383,16 @@ test('a per-checkpoint override beats the global cap', () => {
 });
 
 test('the shipped defaults give the final review more rounds than the plan', () => {
-  assert.strictEqual(rounds.maxFor('plan', config.DEFAULTS), 5);
+  assert.strictEqual(rounds.maxFor('plan', config.DEFAULTS), 3);
   assert.strictEqual(rounds.maxFor('premerge', config.DEFAULTS), 7);
+  // A feature review is per task, so its budget is read through its scope.
+  assert.strictEqual(rounds.maxFor(rounds.scopeFor('feature', 'Task 26'), config.DEFAULTS), 3);
 });
 
 test('a nonsense cap falls back rather than disabling the guard', () => {
-  assert.strictEqual(rounds.maxFor('plan', { audit: { maxRounds: 0 } }), 5);
-  assert.strictEqual(rounds.maxFor('plan', { audit: { maxRounds: -3 } }), 5);
-  assert.strictEqual(rounds.maxFor('plan', {}), 5);
+  assert.strictEqual(rounds.maxFor('plan', { audit: { maxRounds: 0 } }), 3);
+  assert.strictEqual(rounds.maxFor('plan', { audit: { maxRounds: -3 } }), 3);
+  assert.strictEqual(rounds.maxFor('plan', {}), 3);
 });
 
 
@@ -517,4 +534,115 @@ test('two cycles started in the same millisecond are still different cycles', ()
   phase.start({ cwd });
 
   assert.strictEqual(rounds.entry('plan', cwd).used, 0, 'a new cycle is a new budget, even one millisecond later');
+});
+
+/* ---- per-task feature reviews ---------------------------------------- */
+
+test('each task gets its own feature-review budget', async () => {
+  const cwd = project();
+  phase.start({ cwd });
+  seal(cwd, { steps: ['s0'] });
+
+  const stub = stubAuditor('concerns', []);
+  try {
+    // Spend Task 26's whole budget.
+    for (let i = 0; i < 3; i += 1) {
+      fs.writeFileSync(path.join(cwd, 'work.txt'), `task26 iteration ${i}`);
+      await audit.run({ checkpoint: 'feature', task: 'Task 26', cwd, cfg: CFG });
+    }
+    assert.strictEqual(rounds.entry('feature:Task 26', cwd).used, 3);
+
+    // Task 27 must start fresh. Sharing one cycle-wide budget meant the later
+    // tasks in a long phase got unenforced reviews.
+    fs.writeFileSync(path.join(cwd, 'work.txt'), 'task27');
+    const next = await audit.run({ checkpoint: 'feature', task: 'Task 27', cwd, cfg: CFG });
+    assert.strictEqual(next.ok, true, 'Task 27 must not inherit Task 26 spend');
+    assert.strictEqual(rounds.entry('feature:Task 27', cwd).used, 1);
+  } finally {
+    stub.restore();
+  }
+});
+
+test('fixing the code lets the review run again — the deadlock', async () => {
+  const cwd = project();
+  phase.start({ cwd });
+  seal(cwd, { steps: ['s0'] });
+  fs.writeFileSync(path.join(cwd, 'buggy.js'), 'const x = 1;');
+
+  const blocking = stubAuditor('block', [{ severity: 'high', summary: 'id ties change pair ownership' }]);
+  try {
+    const first = await audit.run({ checkpoint: 'feature', task: 'Task 26', cwd, cfg: CFG });
+    assert.strictEqual(first.ok, true);
+    assert.strictEqual(gate.isBlocked(cwd), true);
+  } finally {
+    blocking.restore();
+  }
+
+  // Claude fixes the finding. Nothing about the plan or tickets changed — only
+  // the working tree. Keying the "already audited?" check on plan substance
+  // alone refused this re-review, leaving no legal move but asking a human to
+  // clear the gate. That was the bug.
+  fs.writeFileSync(path.join(cwd, 'buggy.js'), 'const x = 1; // normalised ids\n');
+
+  const passing = stubAuditor('pass', []);
+  try {
+    const retry = await audit.run({ checkpoint: 'feature', task: 'Task 26', cwd, cfg: CFG });
+    assert.notStrictEqual(retry.skipped, true, 'a fixed diff must be reviewable');
+    assert.strictEqual(retry.ok, true);
+    assert.ok(retry.reopened, 'and a passing re-review reopens the gate without a human');
+    assert.strictEqual(gate.isBlocked(cwd), false);
+  } finally {
+    passing.restore();
+  }
+});
+
+test('re-reviewing an unchanged diff is still refused', async () => {
+  const cwd = project();
+  phase.start({ cwd });
+  seal(cwd, { steps: ['s0'] });
+  fs.writeFileSync(path.join(cwd, 'same.js'), 'unchanged');
+
+  const stub = stubAuditor('concerns', []);
+  try {
+    await audit.run({ checkpoint: 'feature', task: 'T1', cwd, cfg: CFG });
+    const again = await audit.run({ checkpoint: 'feature', task: 'T1', cwd, cfg: CFG });
+    assert.strictEqual(again.skipped, true, 'nothing moved, so the call would say the same thing');
+    assert.strictEqual(again.unchanged, true);
+    assert.strictEqual(stub.count, 1);
+  } finally {
+    stub.restore();
+  }
+});
+
+test('a code review re-seals so the auditor sees the current tree', async () => {
+  const cwd = project();
+  phase.start({ cwd });
+  const sealed = seal(cwd, { steps: ['s0'] });
+  fs.writeFileSync(path.join(cwd, 'late.js'), 'written after sealing');
+
+  const stub = stubAuditor('pass', []);
+  try {
+    const result = await audit.run({ checkpoint: 'premerge', cwd, cfg: CFG });
+    assert.notStrictEqual(result.bundleId, sealed.id, 'a stale snapshot would describe a diff that no longer exists');
+    assert.match(stub.prompts[0], /late\.js/, 'the auditor must be shown the file that actually changed');
+  } finally {
+    stub.restore();
+  }
+});
+
+test('the gate records which task blocked it', async () => {
+  const cwd = project();
+  phase.start({ cwd });
+  seal(cwd, { steps: ['s0'] });
+  fs.writeFileSync(path.join(cwd, 'x.js'), 'code');
+
+  const stub = stubAuditor('block', [{ severity: 'high', summary: 'bad' }]);
+  try {
+    await audit.run({ checkpoint: 'feature', task: 'Task 26', cwd, cfg: CFG });
+    const g = gate.status(cwd);
+    assert.strictEqual(g.scope, 'feature:Task 26');
+    assert.strictEqual(g.task, 'Task 26');
+  } finally {
+    stub.restore();
+  }
 });
