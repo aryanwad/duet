@@ -37,7 +37,39 @@ function main() {
 
   const notes = [];
 
-  if (cfg.auditMode === 'on-demand') return; // nothing automatic to warn about
+  /**
+   * The autonomy contract.
+   *
+   * Stated here because SessionStart fires regardless of which command is
+   * running, so it does not depend on Claude having read wrap.md or gate.md —
+   * and because the failure it prevents is silent: a phase that stops to ask
+   * looks like caution rather than a bug, so nobody reports it.
+   */
+  try {
+    const fs2 = require('node:fs');
+    const path2 = require('node:path');
+    if (fs2.existsSync(path2.join(process.cwd(), '.duet'))) {
+      notes.push([
+        'duet: while a cycle is running, decisions inside it are yours to make.',
+        '  A blocked audit is the middle of a loop, not a question. Fix, re-audit, carry on;',
+        '  at the round cap duet opens the gate itself and records the findings.',
+        '  An ambiguous ticket is resolved by picking the reading that fits the sealed plan',
+        '  and saying which you picked — not by stopping.',
+        '  duet refusals name their own next step; follow it rather than escalating.',
+        '  The user is consulted twice: agreeing the plan, and reporting the finished phase.',
+      ].join('\n'));
+    }
+  } catch { /* advisory only */ }
+
+  if (cfg.auditMode === 'on-demand') {
+    // Still emit the contract even when no checkpoint fires automatically.
+    if (notes.length) {
+      process.stdout.write(`${JSON.stringify({
+        hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: notes.join('\n') },
+      })}\n`);
+    }
+    return;
+  }
 
   const pre = codex.preflight();
   if (!pre.ok) {

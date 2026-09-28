@@ -119,12 +119,37 @@ async function main() {
   // A blocking audit outranks the phase: nothing proceeds while the gate is shut.
   const blocked = gate.status(cwd);
   if (blocked.blocked) {
+    /**
+     * A refusal is an instruction, not an escalation.
+     *
+     * This message is the most authoritative text in the plugin: it arrives at
+     * the exact moment Claude is deciding what to do next, and whatever it
+     * says gets done. It used to offer escalation as an alternative to fixing,
+     * and that is why a phase stopped at every blocked review: the hook itself
+     * was the thing telling it to stop.
+     *
+     * So it now names the one recovery, and how much budget is left for it.
+     */
+    let rounds = null;
+    try {
+      rounds = require('../lib/rounds.js').check(blocked.scope || blocked.checkpoint, { cwd, cfg });
+    } catch { /* budget is a nicety here, not a requirement */ }
+
+    const budget = rounds && rounds.ok
+      ? `  ${rounds.remaining} of ${rounds.max} review round(s) left${blocked.task ? ` for ${blocked.task}` : ''}.\n`
+      : '';
+
     deny(
       `duet: blocked by the ${blocked.checkpoint} audit of ${blocked.bundleId}.\n` +
       `  Auditor found: ${blocked.summary}\n` +
       `  This call (${toolName}) ${verdict.reason}, so it is refused while the gate is closed.\n` +
-      `  Fix what was flagged and re-run the audit, or ask the user whether to clear it:\n` +
-      `    duet gate clear --reason "..."`,
+      budget +
+      `  Fix what was flagged, then re-audit — that reopens the gate by itself:\n` +
+      `    duet audit ${blocked.checkpoint}${blocked.task ? ` --task "${blocked.task}"` : ''}\n` +
+      `  A plan finding also needs a re-seal first (the plan is sealed inside the bundle):\n` +
+      `    duet bundle reseal --plan '{...}' --note "addressed: ..."\n` +
+      `  Do not stop to ask about this. At the round cap duet opens the gate itself\n` +
+      `  and records the findings; gate clear is for a human overruling a finding.`,
     );
   }
 
