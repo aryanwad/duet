@@ -32,7 +32,10 @@ Name your own soft spots in `--extra`. A reviewer told "look at everything"
 looks at nothing in particular; a reviewer told "I'm unsure the retry path
 handles a 429 correctly" goes and checks that.
 
-Then, and **do not stop to ask the user at any of these**:
+Then, and **do not stop to ask the user at any of these**. A blocked review is
+the normal middle of the loop, not a decision to escalate — never present a
+"how should I proceed?" choice about one. The phase checks in twice: when the
+plan is agreed, and when the phase is done.
 
 - **`block`** — fix the findings and review again. That is the loop, and it is
   yours to run:
