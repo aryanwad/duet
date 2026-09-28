@@ -271,6 +271,36 @@ const COMMANDS = {
       return out('duet cycle ended; enforcement is off for this project.', false);
     }
 
+    if (sub === 'unset') {
+      // A saved value shadows the default forever, including a default that
+      // later ships better. Without this the only way back is editing JSON by
+      // hand, and most people never find out they are overriding anything.
+      const key = positional[2];
+      if (!key) throw new Error('config unset needs a dotted key, e.g. audit.maxRoundsByCheckpoint.feature');
+      const saved = require('node:fs').existsSync(config.CONFIG_PATH)
+        ? JSON.parse(require('node:fs').readFileSync(config.CONFIG_PATH, 'utf8'))
+        : {};
+      const parts = key.split('.');
+      let node = saved;
+      for (let i = 0; i < parts.length - 1; i += 1) {
+        if (!node || typeof node !== 'object') { node = null; break; }
+        node = node[parts[i]];
+      }
+      const had = node && typeof node === 'object' && parts[parts.length - 1] in node;
+      if (had) delete node[parts[parts.length - 1]];
+      require('../lib/state.js').writeJson(config.CONFIG_PATH, saved);
+
+      const now = config.load();
+      let effective = now;
+      for (const part of parts) effective = effective?.[part];
+      return out(
+        had
+          ? `unset ${key} — now falling back to the shipped default (${JSON.stringify(effective)})`
+          : `${key} was not overridden; the shipped default (${JSON.stringify(effective)}) already applies`,
+        false,
+      );
+    }
+
     if (sub === 'set') {
       const to = positional[2];
       if (!to) throw new Error(`phase set needs one of: ${phases.PHASES.join(', ')}`);
@@ -591,6 +621,36 @@ const COMMANDS = {
       if (!mode) throw new Error(`config mode needs one of: ${config.AUDIT_MODES.join(', ')}`);
       const next = config.setAuditMode(mode);
       return out(json ? next : `audit mode set to "${next.auditMode}" (fires at: ${config.AUDIT_CHECKPOINTS[mode].join(', ') || 'on demand only'})`, json);
+    }
+
+    if (sub === 'unset') {
+      // A saved value shadows the default forever, including a default that
+      // later ships better. Without this the only way back is editing JSON by
+      // hand, and most people never find out they are overriding anything.
+      const key = positional[2];
+      if (!key) throw new Error('config unset needs a dotted key, e.g. audit.maxRoundsByCheckpoint.feature');
+      const saved = require('node:fs').existsSync(config.CONFIG_PATH)
+        ? JSON.parse(require('node:fs').readFileSync(config.CONFIG_PATH, 'utf8'))
+        : {};
+      const parts = key.split('.');
+      let node = saved;
+      for (let i = 0; i < parts.length - 1; i += 1) {
+        if (!node || typeof node !== 'object') { node = null; break; }
+        node = node[parts[i]];
+      }
+      const had = node && typeof node === 'object' && parts[parts.length - 1] in node;
+      if (had) delete node[parts[parts.length - 1]];
+      require('../lib/state.js').writeJson(config.CONFIG_PATH, saved);
+
+      const now = config.load();
+      let effective = now;
+      for (const part of parts) effective = effective?.[part];
+      return out(
+        had
+          ? `unset ${key} — now falling back to the shipped default (${JSON.stringify(effective)})`
+          : `${key} was not overridden; the shipped default (${JSON.stringify(effective)}) already applies`,
+        false,
+      );
     }
 
     if (sub === 'set') {
