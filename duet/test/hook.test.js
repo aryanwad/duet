@@ -84,7 +84,11 @@ test('work is allowed once the phase is audited', () => {
   assert.strictEqual(runHook({ ...EDIT_CALL, cwd }, projectDir).code, 0);
 });
 
-test('a closed gate denies work even in an allowed phase', () => {
+test('a closed CODE gate allows the edit that fixes what it flagged', () => {
+  // The refusal used to be total, which made the phase unrunnable: the hook
+  // said "fix what was flagged" and then refused every edit that could do the
+  // fixing, leaving `gate clear` as the only legal move. Claude correctly
+  // reported that only a human could proceed. This is that hole.
   const { cwd, projectDir } = freshProject();
   writeState(projectDir, 'phase.json', { active: true, phase: 'building', history: [] });
   writeState(projectDir, 'gate.json', {
@@ -96,10 +100,74 @@ test('a closed gate denies work even in an allowed phase', () => {
   });
 
   const result = runHook({ ...EDIT_CALL, cwd }, projectDir);
+  assert.strictEqual(result.code, 0, 'fixing flagged code must not require clearing the gate');
+});
+
+test('a closed code gate still refuses to dispatch more work', () => {
+  const { cwd, projectDir } = freshProject();
+  writeState(projectDir, 'phase.json', { active: true, phase: 'building', history: [] });
+  writeState(projectDir, 'gate.json', {
+    blocked: true, bundleId: 'b9', checkpoint: 'feature', task: 'task-26',
+    summary: 'pump never spins', findings: [],
+  });
+
+  const result = runHook({
+    hook_event_name: 'PreToolUse',
+    tool_name: 'Task',
+    tool_input: { subagent_type: 'duet-worker', prompt: 'next ticket' },
+    cwd,
+  }, projectDir);
   assert.strictEqual(result.code, 2);
   const reason = JSON.parse(result.stdout).hookSpecificOutput.permissionDecisionReason;
-  assert.match(reason, /data loss on retry/);
-  assert.match(reason, /gate clear/);
+  assert.match(reason, /pump never spins/);
+  assert.match(reason, /editing files to FIX it is allowed/);
+  assert.doesNotMatch(reason, /gate clear/, 'the refusal must not offer clearing as the way out');
+});
+
+test('a closed code gate still refuses a Codex worker, like a Task', () => {
+  const { cwd, projectDir } = freshProject();
+  writeState(projectDir, 'phase.json', { active: true, phase: 'building', history: [] });
+  writeState(projectDir, 'gate.json', {
+    blocked: true, bundleId: 'b9', checkpoint: 'feature', summary: 'no regression test', findings: [],
+  });
+
+  const result = runHook({
+    hook_event_name: 'PreToolUse',
+    tool_name: 'Bash',
+    tool_input: { command: 'codex exec -m gpt-5.6-sol --sandbox workspace-write "next ticket"' },
+    cwd,
+  }, projectDir);
+  assert.strictEqual(result.code, 2);
+});
+
+test('a closed code gate still refuses the commit', () => {
+  const { cwd, projectDir } = freshProject();
+  writeState(projectDir, 'phase.json', { active: true, phase: 'verified', history: [] });
+  writeState(projectDir, 'gate.json', {
+    blocked: true, bundleId: 'b9', checkpoint: 'premerge', summary: 'data loss on retry', findings: [],
+  });
+
+  const result = runHook({
+    hook_event_name: 'PreToolUse',
+    tool_name: 'Bash',
+    tool_input: { command: 'git commit -m "ship it"' },
+    cwd,
+  }, projectDir);
+  assert.strictEqual(result.code, 2, 'the review still governs what enters history');
+});
+
+test('a closed PLAN gate still denies code edits', () => {
+  // Nothing has been agreed yet, so there is no sanctioned code to write.
+  // Only plan files are writable here, and that exemption already exists.
+  const { cwd, projectDir } = freshProject();
+  writeState(projectDir, 'phase.json', { active: true, phase: 'building', history: [] });
+  writeState(projectDir, 'gate.json', {
+    blocked: true, bundleId: 'b9', checkpoint: 'plan', summary: 'no rollback', findings: [],
+  });
+
+  const result = runHook({ ...EDIT_CALL, cwd }, projectDir);
+  assert.strictEqual(result.code, 2);
+  assert.match(JSON.parse(result.stdout).hookSpecificOutput.permissionDecisionReason, /no rollback/);
 });
 
 test('a Codex write-worker is denied while the gate is closed', () => {

@@ -293,3 +293,39 @@ test('an immediately restarted cycle gets a fresh continuation budget', () => {
   assert.strictEqual(d.block, true, 'a surrendered previous cycle must not silence the new one');
   assert.strictEqual(d.blocks, 1);
 });
+
+/* ---- the instruction has to suit the checkpoint ----------------------- */
+
+test('a blocked CODE review is told to edit and re-audit, with no re-seal', () => {
+  // This text arrives at the moment Claude decides whether to stop, so a wrong
+  // recipe here stops the phase as surely as a missing exemption does. It used
+  // to hand every blocked review the PLAN recipe: re-seal with --plan, and
+  // "editing the file alone leaves the auditor reading the old text". For a
+  // code finding the edit IS the fix, `audit` re-snapshots the tree itself,
+  // and `bundle reseal` has no --refresh-repo flag to run even if it did not.
+  const cwd = project();
+  phase.start({ cwd });
+  for (const p of ['sealed', 'audited', 'building']) phase.set(p, { cwd });
+  gate.raise({
+    bundleId: 'b1', checkpoint: 'feature', scope: 'feature:task-26', task: 'task-26',
+    summary: 'apply_pump never spins the pump',
+    findings: [{ severity: 'high', summary: 'pump never spins' }],
+    cwd,
+  });
+
+  const action = stopgate.nextAction({ cwd, cfg: CFG });
+  assert.match(action, /Editing the flagged code is allowed/);
+  assert.match(action, /duet audit feature --task "task-26"/);
+  assert.doesNotMatch(action, /reseal/, 'a code review re-reads the tree; do not ask for a re-seal');
+  assert.doesNotMatch(action, /gate clear/);
+});
+
+test('a blocked PLAN review is still told to re-seal', () => {
+  const cwd = project();
+  phase.start({ cwd });
+  gate.raise({ bundleId: 'b2', checkpoint: 'plan', summary: 'no rollback path', findings: [], cwd });
+
+  const action = stopgate.nextAction({ cwd, cfg: CFG });
+  assert.match(action, /reseal/, 'the plan is sealed inside the bundle — the edit alone is invisible');
+  assert.match(action, /duet audit plan/);
+});

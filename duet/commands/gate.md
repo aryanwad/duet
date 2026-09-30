@@ -10,6 +10,14 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" gate show
 
 ## During a phase you do not need this command
 
+**A closed code gate does not stop you fixing what it flagged.** At the
+`feature` and `premerge` checkpoints you may edit files while the gate is shut
+— that is the sanctioned repair, and refusing it would mean clearing the gate
+in order to fix what the gate asked for. What stays refused is dispatching new
+work and committing, because those are the two moves that would skip the
+review. A code review re-reads the working tree for itself, so the fix needs no
+re-seal: edit, then `duet audit <checkpoint> --task "<task>"`.
+
 A closed gate is the normal middle of a review loop, not a problem to escalate.
 It opens by itself, two ways, and both are automatic:
 
@@ -50,13 +58,17 @@ Write down what was argued, not "user approved".
 Something is wrong upstream, and reaching for `gate clear` will hide it. Check,
 in this order:
 
-1. **Did the re-review actually run?** `duet audit feature --task "<task>"`
+1. **Did you try fixing it?** Code edits are permitted while a code gate is
+   closed. If an `Edit` was refused, check whether the block came from the
+   `plan` checkpoint — before a plan is agreed there is no sanctioned code to
+   write, and only plan files are writable.
+2. **Did the re-review actually run?** `duet audit feature --task "<task>"`
    should either return a verdict or refuse with a reason. If it says the
    content was already audited, the thing it reviews has not changed — for a
    code review that means the working tree, so make the fix real.
-2. **Are you passing `--task`?** Without it the whole phase shares one budget
+3. **Are you passing `--task`?** Without it the whole phase shares one budget
    and later tasks exhaust it.
-3. **Is the budget spent?** `duet gate show` names the scope. At the cap the
+4. **Is the budget spent?** `duet gate show` names the scope. At the cap the
    gate should already be open; if it is closed with no rounds left, `onCap`
    is set to `halt` and the user has asked to be stopped there.
 

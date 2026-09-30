@@ -4,6 +4,7 @@ const path = require('node:path');
 const phase = require('./phase.js');
 const gate = require('./gate.js');
 const rounds = require('./rounds.js');
+const { CODE_CHECKPOINTS } = require('./audit.js');
 const bundles = require('./bundle.js');
 const { projectDir, ensureDir, readJson, writeJson } = require('./state.js');
 
@@ -103,14 +104,48 @@ function nextAction({ cwd = process.cwd(), cfg } = {}) {
     // the one situation where duet has decided it needs them.
     if (!spent.ok && spent.why === 'capped') return null;
 
+    const task = g.task ? ` --task "${g.task}"` : '';
+    const findings = (g.findings || []).slice(0, 4)
+      .map((f) => `  [${f.severity}] ${f.summary}${f.suggestion ? ` -> ${f.suggestion}` : ''}`);
+
+    /**
+     * A code finding and a plan finding need opposite things, and this used to
+     * give both of them the plan's instructions.
+     *
+     * For a plan finding the re-seal is the whole point: the plan is sealed
+     * inside the bundle, so editing the document on disk leaves the auditor
+     * reading the old text. For a code finding that advice is actively wrong —
+     * the fix IS an edit to the working tree, `audit` re-snapshots the tree for
+     * code checkpoints by itself, and there is no `--refresh-repo` flag to run
+     * even if it did not. Handed the plan recipe, Claude reached for a re-seal
+     * it could not perform and stopped.
+     */
+    if (CODE_CHECKPOINTS.includes(checkpoint)) {
+      return [
+        `The ${checkpoint} review of ${g.task || g.bundleId} is blocking: ${g.summary}`,
+        '',
+        ...findings,
+        '',
+        `Editing the flagged code is allowed while this gate is closed. Do that now`,
+        `(${spent.remaining} round(s) left), then re-review:`,
+        '',
+        '  1. edit the code to address the findings above',
+        `  2. duet audit ${checkpoint}${task}`,
+        '',
+        'No re-seal is needed — a code review re-reads the working tree for itself.',
+        'A passing verdict reopens the gate. Keep going; this is not a decision for',
+        'the user.',
+      ].join('\n');
+    }
+
     return [
       `The ${checkpoint} audit is blocking: ${g.summary}`,
       '',
-      ...(g.findings || []).slice(0, 4).map((f) => `  [${f.severity}] ${f.summary}${f.suggestion ? ` -> ${f.suggestion}` : ''}`),
+      ...findings,
       '',
       `Fix what you accept, then re-seal and re-audit (${spent.remaining} round(s) left):`,
       '  duet bundle reseal --plan \'{...}\' --note "addressed: <finding>"',
-      `  duet audit ${checkpoint}`,
+      `  duet audit ${checkpoint}${task}`,
       '',
       'Re-sealing is required — the plan is sealed inside the bundle, so editing',
       'the plan file alone leaves the auditor reading the old text.',

@@ -118,6 +118,43 @@ async function main() {
 
   // A blocking audit outranks the phase: nothing proceeds while the gate is shut.
   const blocked = gate.status(cwd);
+
+  /**
+   * Fixing flagged CODE is allowed while a code gate is closed, for exactly
+   * the reason editing the plan is allowed while a plan gate is closed:
+   * otherwise the only route to the sanctioned repair runs through clearing
+   * the gate that asked for it.
+   *
+   * That omission is why a phase stopped at every blocked review. The refusal
+   * said "fix what was flagged, then re-audit" while the same hook refused
+   * every edit that could have done the fixing, so the only legal move left
+   * really was to ask a human to clear it. Claude was reporting the situation
+   * accurately; the situation was wrong.
+   *
+   * Nothing is lost by allowing it. The gate's job at a code checkpoint is to
+   * keep an unreviewed diff out of history, and that is enforced separately by
+   * commit clearance, which is tied to the exact diff and voided by any edit.
+   * So the two things still refused here are the two that would actually skip
+   * the review: starting new work, and committing.
+   */
+  if (blocked.blocked && ['feature', 'premerge'].includes(blocked.checkpoint)) {
+    // Both families count. A `codex exec --sandbox workspace-write` starts new
+    // work exactly as much as a Task does, and duet exists to treat them alike,
+    // so take the classifier's own word for it rather than naming one tool.
+    const startsNewWork = /^dispatches /.test(verdict.reason);
+    if (!startsNewWork && !isCommit) process.exit(0);
+
+    deny(
+      `duet: the ${blocked.checkpoint} review of ${blocked.task || blocked.bundleId} is blocking.\n` +
+      `  Auditor found: ${blocked.summary}\n` +
+      `  ${startsNewWork ? 'Dispatching more work' : 'Committing'} is refused until it is resolved, ` +
+      `but editing files to FIX it is allowed — do that now:\n` +
+      `    1. edit the flagged code\n` +
+      `    2. duet audit ${blocked.checkpoint}${blocked.task ? ` --task "${blocked.task}"` : ''}\n` +
+      `  A passing re-review reopens the gate by itself. Do not ask to have it cleared.`,
+    );
+  }
+
   if (blocked.blocked) {
     /**
      * A refusal is an instruction, not an escalation.

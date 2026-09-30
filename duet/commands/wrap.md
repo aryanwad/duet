@@ -140,8 +140,9 @@ Work the whole phase. Do not stop between tickets to check in.
 yourself.** Never stop to ask whether to clear a gate — the gate opens on a
 passing re-review, or duet opens it at the cap. Pass `--task` so the budget is that task's own 3 rounds rather than
 one shared across the phase. A blocking feature review is your work to fix and
-re-review, exactly like the plan loop in step 4 — it is never a reason to ask
-the user to clear the gate.
+re-review — edit the flagged code (permitted with the gate shut) and run
+`duet audit feature --task "<task>"`. It is never a reason to ask the user to
+clear the gate.
 
 ## 7. The pre-commit loop
 
@@ -158,10 +159,14 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" audit premerge \
 Re-seal first so the bundle reflects what was built rather than what was
 planned.
 
-Same loop as step 4, same cap, same rule: when Astra blocks, **fix the code,
-re-seal, re-audit** — do not stop and ask. The findings here are about the
-diff, so the fix is an edit, and the re-seal carries the updated repo snapshot
-to the auditor.
+Same loop as step 4, same cap, same rule: when Astra blocks, **fix the code and
+re-audit** — do not stop and ask.
+
+The findings here are about the diff, so the fix is an edit, and **editing is
+allowed while a code gate is closed** — only dispatching new work and
+committing stay refused. No re-seal either: a code review re-snapshots the
+working tree itself, which is the opposite of the plan loop in step 4, where
+re-sealing is the step that makes the fix visible at all.
 
 At the cap, duet opens the gate and grants commit clearance with the findings
 recorded. The commit goes through. That is intended.
