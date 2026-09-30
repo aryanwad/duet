@@ -138,6 +138,25 @@ function isPlanOnlyCommand(command, patterns = []) {
 }
 
 /**
+ * An agent's name without its plugin namespace.
+ *
+ * The allowlist is written as bare names (`duet-scout`), but Claude Code
+ * dispatches a plugin's agent namespaced (`duet:duet-scout`), so an exact
+ * comparison matched only the spelling nobody sends. That was invisible while
+ * the `Agent` tool escaped classification altogether; gating `Agent` correctly
+ * turned a silent hole into a visible over-block, and research agents started
+ * being refused during planning and under a closed gate.
+ *
+ * Normalizing both sides means the allowlist accepts either spelling, so a
+ * config written before or after this change keeps working.
+ */
+function bareAgent(name) {
+  const s = String(name || '').trim();
+  const i = s.lastIndexOf(':');
+  return (i === -1 ? s : s.slice(i + 1)).toLowerCase();
+}
+
+/**
  * @param {string} toolName
  * @param {object} toolInput
  * @returns {{mutating: boolean, reason: string}}
@@ -145,9 +164,10 @@ function isPlanOnlyCommand(command, patterns = []) {
 function classify(toolName, toolInput = {}, { readOnlyAgents = [] } = {}) {
   if (DISPATCH_TOOLS.includes(toolName)) {
     // A scout or researcher changes nothing; refusing it would block the
-    // research that makes a plan worth auditing in the first place.
+    // research that makes a plan worth auditing in the first place -- during
+    // planning and under a closed gate, which is exactly when it is wanted.
     const agent = toolInput.subagent_type || toolInput.agent || toolInput.subagentType;
-    if (agent && readOnlyAgents.includes(agent)) {
+    if (agent && readOnlyAgents.some((a) => bareAgent(a) === bareAgent(agent))) {
       return { mutating: false, reason: `${agent} is a read-only agent` };
     }
     return { mutating: true, reason: 'dispatches a subagent to do work' };
@@ -163,4 +183,4 @@ function classify(toolName, toolInput = {}, { readOnlyAgents = [] } = {}) {
 }
 
 module.exports = {
-  DISPATCH_TOOLS, MUTATING_TOOLS, BASH_MUTATION, ALWAYS_ALLOWED_BASH, classifyBash, classify, isPlanFile, isPlanOnlyCommand };
+  DISPATCH_TOOLS, bareAgent, MUTATING_TOOLS, BASH_MUTATION, ALWAYS_ALLOWED_BASH, classifyBash, classify, isPlanFile, isPlanOnlyCommand };

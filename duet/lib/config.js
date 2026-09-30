@@ -152,7 +152,10 @@ const DEFAULTS = Object.freeze({
    *
    * Only add an agent here if its frontmatter `tools:` genuinely cannot write.
    */
-  readOnlyAgents: ['duet-scout', 'duet-researcher', 'duet-summarizer', 'duet-prior-art'],
+  // Matched on the bare name, so `duet-scout` and `duet:duet-scout` both hit.
+  // `Explore` and `Plan` are Claude Code's own; both are defined without
+  // Edit/Write/NotebookEdit, so neither can carry out work.
+  readOnlyAgents: ['duet-scout', 'duet-researcher', 'duet-summarizer', 'duet-prior-art', 'Explore', 'Plan'],
 
   /**
    * Commit discipline. A commit is a claim about history, so duet refuses one

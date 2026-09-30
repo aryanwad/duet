@@ -283,3 +283,48 @@ test('an Agent dispatch is refused before the plan is audited', () => {
   }, projectDir);
   assert.strictEqual(result.code, 2, 'no worker runs before the plan audit passes');
 });
+
+/* ---- the allowlist has to match the name that is actually sent -------- */
+
+test('a read-only agent is exempt under its namespaced name', () => {
+  // The allowlist is written bare (`duet-scout`) but Claude Code dispatches a
+  // plugin's agent namespaced (`duet:duet-scout`), so the exact comparison
+  // matched only the spelling nobody sends. Gating `Agent` correctly exposed
+  // it: research agents started being refused during planning and under a
+  // closed gate -- precisely when a scout is what you want.
+  const readOnlyAgents = require('../lib/config.js').DEFAULTS.readOnlyAgents;
+  for (const tool of ['Task', 'Agent']) {
+    for (const name of ['duet-scout', 'duet:duet-scout', 'duet:duet-prior-art', 'Explore']) {
+      const v = mutating.classify(tool, { subagent_type: name }, { readOnlyAgents });
+      assert.strictEqual(v.mutating, false, `${tool} ${name} must not be gated`);
+    }
+  }
+});
+
+test('a worker is still gated under its namespaced name', () => {
+  const readOnlyAgents = require('../lib/config.js').DEFAULTS.readOnlyAgents;
+  for (const tool of ['Task', 'Agent']) {
+    for (const name of ['duet-worker', 'duet:duet-worker']) {
+      assert.strictEqual(
+        mutating.classify(tool, { subagent_type: name }, { readOnlyAgents }).mutating, true,
+        `${tool} ${name} must be gated`,
+      );
+    }
+  }
+});
+
+test('the real hook lets a namespaced scout run under a closed gate', () => {
+  const { cwd, projectDir } = freshProject();
+  writeState(projectDir, 'phase.json', { active: true, phase: 'planned', history: [] });
+  writeState(projectDir, 'gate.json', {
+    blocked: true, bundleId: 'b1', checkpoint: 'plan', summary: 'no rollback', findings: [],
+  });
+
+  const result = runHook({
+    hook_event_name: 'PreToolUse',
+    tool_name: 'Agent',
+    tool_input: { subagent_type: 'duet:duet-scout', prompt: 'what does the codebase do here' },
+    cwd,
+  }, projectDir);
+  assert.strictEqual(result.code, 0, 'research is how a blocking plan finding gets resolved');
+});
