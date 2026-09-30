@@ -139,7 +139,11 @@ test('codex argv carries model, effort, sandbox and json', () => {
   assert.ok(args.includes('read-only'));
   assert.ok(args.includes('--json'));
   assert.ok(args.includes('--skip-git-repo-check'));
-  assert.strictEqual(args.at(-1), 'audit this');
+  // The prompt itself must never land in argv (Windows cmd.exe truncates long
+  // command lines when the codex binary resolves to an npm .cmd shim) — '-'
+  // tells codex exec to read it from stdin instead; run() writes it there.
+  assert.strictEqual(args.at(-1), '-');
+  assert.ok(!args.includes('audit this'));
 });
 
 test('workspace-write does not skip the git repo check', () => {
@@ -166,7 +170,10 @@ test('every flag passed is one codex exec actually accepts', () => {
     prompt: 'x', model: 'gpt-5.6-sol', effort: 'high',
     sandbox: 'workspace-write', cwd: '/r', outputFile: '/tmp/o',
   });
-  for (const arg of args.slice(1)) {
+  // The trailing '-' is the positional PROMPT argument (read stdin), not a flag,
+  // even though it starts with '-' like one; the loop below only checks flags.
+  assert.strictEqual(args.at(-1), '-');
+  for (const arg of args.slice(1, -1)) {
     if (arg.startsWith('-')) {
       assert.ok(ACCEPTED.has(arg), `unrecognised flag passed to codex exec: ${arg}`);
     }

@@ -121,8 +121,9 @@ function isPlanOnlyCommand(command, patterns = []) {
   // One command at a time; chaining could smuggle anything after the &&.
   if (/[;&|><`$(]/.test(text)) return false;
 
-  const tokens = text
-    .split(/\s+/)
+  // A quoted token stays whole: a home directory with a space in it
+  // ("C:\Users\Jane Doe\...") must not split into two non-plan tokens.
+  const tokens = (text.match(/"[^"]*"|'[^']*'|\S+/g) || [])
     .slice(1)
     .filter((tok) => tok && !tok.startsWith('-'))
     .map((tok) => tok.replace(/^["']|["']$/g, ''));

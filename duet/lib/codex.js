@@ -3,7 +3,7 @@
 const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawn, execFileSync } = require('node:child_process');
+const spawn = require('cross-spawn');
 
 /**
  * Thin wrapper over the official Codex CLI.
@@ -22,12 +22,13 @@ function binary() {
 }
 
 function installed() {
-  try {
-    execFileSync(binary(), ['--version'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
+  /**
+   * npm installs global CLIs as .cmd shims on Windows, which node:child_process
+   * cannot exec directly without shell:true. cross-spawn resolves and invokes
+   * shims correctly on all platforms, so use it here too instead of execFileSync.
+   */
+  const result = spawn.sync(binary(), ['--version'], { stdio: 'ignore' });
+  return result.status === 0;
 }
 
 /** We only check that a credential file exists; validating it is Codex's job. */
@@ -130,7 +131,16 @@ function buildArgs({
   // Read-only work (auditing, reading) has no reason to demand a git repo.
   if (sandbox === 'read-only') args.push('--skip-git-repo-check');
 
-  args.push(prompt);
+  // The prompt is sent over stdin (run() writes it after spawning), never as an
+  // argv element. On Windows the `codex` binary resolves to an npm .cmd shim, so
+  // cross-spawn funnels the whole command through `cmd.exe /d /s /c "..."` with
+  // extra meta-character escaping on top. cmd.exe has a practical ~8191-character
+  // command-line limit; any prompt of real size (a rendered audit bundle, easily
+  // several KB) silently gets truncated or mangled before Codex ever sees it —
+  // the auditor then replies to what looks like an empty turn, and the reply
+  // carries no JSON verdict block to parse. `-` tells `codex exec` to read its
+  // instructions from stdin instead, which has no such limit on any platform.
+  args.push('-');
   return args;
 }
 
@@ -224,8 +234,17 @@ function run({
     const child = spawn(binary(), args, {
       cwd,
       env,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
+
+    // buildArgs() puts '-' in argv and expects the real prompt here, over stdin —
+    // see the comment there for why (Windows cmd.exe argv length limit). A spawn
+    // failure (e.g. binary not found) can surface as EPIPE on this stream before
+    // the process-level 'error' handler below runs; an unhandled stream error
+    // would crash the caller, so it is swallowed here and left to that handler.
+    child.stdin.on('error', () => {});
+    child.stdin.write(prompt);
+    child.stdin.end();
 
     const timer = setTimeout(() => {
       timedOut = true;

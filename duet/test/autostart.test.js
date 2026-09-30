@@ -270,7 +270,8 @@ test('copying a stranded plan into the project is allowed mid-cycle', () => {
   const result = run(PRE, {
     hook_event_name: 'PreToolUse',
     tool_name: 'Bash',
-    tool_input: { command: `cp ${path.join(os.homedir(), '.claude/plans/draft.md')} docs/plans/2026-09-14-x.md` },
+    // Quoted, as any real shell command must be: the home directory can contain a space.
+    tool_input: { command: `cp "${path.join(os.homedir(), '.claude/plans/draft.md')}" docs/plans/2026-09-14-x.md` },
     cwd,
   }, projectDir, stateDir);
 
@@ -307,6 +308,17 @@ test('the exemption does not become a hole for source files', () => {
     }, projectDir, stateDir);
     assert.strictEqual(r.code, 2, `should still be refused: ${command}`);
   }
+});
+
+test('a quoted path with a space stays one token, both ways', () => {
+  // Independent of the machine's home directory: the stranded-plan test above
+  // only exercises a space when the tests happen to run under one.
+  const patterns = config.DEFAULTS.autoStart.planPathPatterns;
+  assert.ok(mutating.isPlanOnlyCommand('cp "C:\\Users\\Jane Doe\\.claude\\plans\\draft.md" docs/plans/x.md', patterns));
+  assert.ok(mutating.isPlanOnlyCommand("cp '/home/jane doe/.claude/plans/draft.md' docs/plans/x.md", patterns));
+  // Quoting must not hide a source file behind a plan-looking suffix.
+  assert.ok(!mutating.isPlanOnlyCommand('cp "src/my secret.js" docs/plans/x.md', patterns));
+  assert.ok(!mutating.isPlanOnlyCommand('cp "docs/plans/x.md" "src/app plans.js"', patterns));
 });
 
 test('a scout can be dispatched while the gate is locked pre-audit', () => {
