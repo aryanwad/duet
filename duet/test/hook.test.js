@@ -8,6 +8,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
 const HOOK = path.join(__dirname, '..', 'hooks', 'pre-tool-use.js');
+const mutating = require('../lib/mutating.js');
 
 /**
  * These run the hook as a real subprocess with real stdin, because the thing
@@ -208,4 +209,77 @@ test('a corrupt phase file fails open rather than wedging the session', () => {
   fs.mkdirSync(projectDir, { recursive: true });
   fs.writeFileSync(path.join(projectDir, 'phase.json'), '{ this is not json');
   assert.strictEqual(runHook({ ...EDIT_CALL, cwd }, projectDir).code, 0);
+});
+
+/* ---- dispatch, whatever the build calls it --------------------------- */
+
+test('Agent is gated exactly like Task', () => {
+  // The tool that dispatches a worker is `Task` in Claude Code and `Agent` in
+  // newer builds. classify() branched on the string 'Task', so an Agent call
+  // fell through to "does not change the working tree" and the hook exited 0
+  // before the gate or the phase was consulted. Dispatch was ungated outright.
+  for (const tool of ['Task', 'Agent']) {
+    const v = mutating.classify(tool, { subagent_type: 'duet:duet-worker' }, { readOnlyAgents: [] });
+    assert.strictEqual(v.mutating, true, `${tool} must be gated`);
+    assert.match(v.reason, /^dispatches /, 'the code-gate exemption keys off this prefix');
+  }
+});
+
+test('a read-only agent stays exempt under both names', () => {
+  for (const tool of ['Task', 'Agent']) {
+    const v = mutating.classify(tool, { subagent_type: 'duet-scout' }, { readOnlyAgents: ['duet-scout'] });
+    assert.strictEqual(v.mutating, false, `${tool} research must not be blocked`);
+  }
+});
+
+/* ---- inline interpreter code ----------------------------------------- */
+
+test('inline code that writes files is a mutation', () => {
+  // `sed -i` was refused while a heredoc writing the same file went through,
+  // which taught that the shortest way past a refusal is a heredoc.
+  for (const cmd of [
+    'python3 - <<EOF\nopen("ledger.py","w").write("x")\nEOF',
+    "python -c \"open('a.txt','w').write('x')\"",
+    'node -e "require(\'fs\').writeFileSync(\'a.js\',\'x\')"',
+  ]) {
+    assert.strictEqual(mutating.classifyBash(cmd).mutating, true, cmd.slice(0, 40));
+  }
+});
+
+test('inline code that only computes is still allowed', () => {
+  // The file's rule about false positives: a guardrail nobody can work with
+  // gets turned off, and then it guards nothing.
+  for (const cmd of ['python -c "print(2+2)"', 'node -e "console.log(1)"', 'python3 -m pytest -q']) {
+    assert.strictEqual(mutating.classifyBash(cmd).mutating, false, cmd);
+  }
+});
+
+test('an Agent dispatch is refused by the real hook under a closed plan gate', () => {
+  // The end-to-end version of the same bug: before the fix this exited 0.
+  const { cwd, projectDir } = freshProject();
+  writeState(projectDir, 'phase.json', { active: true, phase: 'building', history: [] });
+  writeState(projectDir, 'gate.json', {
+    blocked: true, bundleId: 'b1', checkpoint: 'plan', summary: 'no rollback', findings: [],
+  });
+
+  const result = runHook({
+    hook_event_name: 'PreToolUse',
+    tool_name: 'Agent',
+    tool_input: { subagent_type: 'duet:duet-worker', prompt: 'build it' },
+    cwd,
+  }, projectDir);
+  assert.strictEqual(result.code, 2, 'Agent must be gated like Task');
+});
+
+test('an Agent dispatch is refused before the plan is audited', () => {
+  const { cwd, projectDir } = freshProject();
+  writeState(projectDir, 'phase.json', { active: true, phase: 'planned', history: [] });
+
+  const result = runHook({
+    hook_event_name: 'PreToolUse',
+    tool_name: 'Agent',
+    tool_input: { subagent_type: 'duet:duet-worker', prompt: 'build it' },
+    cwd,
+  }, projectDir);
+  assert.strictEqual(result.code, 2, 'no worker runs before the plan audit passes');
 });

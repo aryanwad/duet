@@ -9,13 +9,27 @@
  * catch the tool calls that actually carry out work, cheaply and without false
  * positives that would make the plugin infuriating to use.
  *
- * Edit/Write/Task are unambiguous. Bash is inspected for the patterns that do
- * real mutation; a determined model could still write a file through a Python
- * one-liner, and that gap is documented rather than papered over.
+ * Edit/Write and the dispatch tools are unambiguous. Bash is inspected for the
+ * patterns that do real mutation; code passed inline to an interpreter is
+ * opaque to any pattern, so it is judged on whether the snippet mentions
+ * writing at all.
  */
 
+/**
+ * Tools that dispatch a worker. The name differs between builds -- Claude Code
+ * calls it `Task`, newer builds call it `Agent` -- and matching only one meant
+ * dispatch was not gated AT ALL wherever the other name was in use: the call
+ * fell through to "does not change the working tree" and the hook exited 0
+ * before the gate or the phase was ever consulted. Workers ran during
+ * `planned`, and under a closed plan gate.
+ *
+ * So match both, and keep matching any future name by adding it here rather
+ * than by branching on one string in classify().
+ */
+const DISPATCH_TOOLS = Object.freeze(['Task', 'Agent']);
+
 /** Tools that exist to change things, or to dispatch someone who will. */
-const MUTATING_TOOLS = Object.freeze(['Edit', 'Write', 'NotebookEdit', 'MultiEdit', 'Task']);
+const MUTATING_TOOLS = Object.freeze(['Edit', 'Write', 'NotebookEdit', 'MultiEdit', ...DISPATCH_TOOLS]);
 
 /** Bash patterns that carry out work. */
 const BASH_MUTATION = [
@@ -40,6 +54,21 @@ const ALWAYS_ALLOWED_BASH = [
   /\bcodex\s+(login|--version)\b/,
 ];
 
+/**
+ * Code handed to an interpreter inline -- `python -c`, `node -e`, a heredoc --
+ * is invisible to the patterns above, so `sed -i` was refused while a Python
+ * heredoc writing the same file went through. That asymmetry is the worst of
+ * both worlds: it does not stop anything, and it teaches that the shortest way
+ * past a refusal is a heredoc.
+ *
+ * Judging the snippet's TEXT rather than the command keeps the file's rule
+ * about false positives: `python -c "print(2+2)"` stays allowed, because it
+ * never mentions writing. This is a heuristic on a guardrail, not a sandbox --
+ * anything determined still gets through, and that is still fine.
+ */
+const INLINE_CODE = /\b(python3?|node|perl|ruby|deno|bun)\b[^|;]*?(\s-(c|e)\b|<<-?\s*['"]?\w+)/;
+const WRITES_IN_CODE = /\b(open\s*\([^)]*['"][rbt]*[wax]|write_text|write_bytes|writeFileSync|writeFile|appendFile|os\.remove|os\.rename|os\.mkdir|makedirs|shutil\.|pathlib|subprocess|os\.system|fs\.rm|mkdirSync|unlinkSync)/;
+
 function classifyBash(command = '') {
   const text = String(command);
 
@@ -48,6 +77,9 @@ function classifyBash(command = '') {
   }
   for (const { re, why } of BASH_MUTATION) {
     if (re.test(text)) return { mutating: true, reason: why };
+  }
+  if (INLINE_CODE.test(text) && WRITES_IN_CODE.test(text)) {
+    return { mutating: true, reason: 'runs inline code that writes files' };
   }
   return { mutating: false, reason: 'no mutation pattern matched' };
 }
@@ -111,7 +143,7 @@ function isPlanOnlyCommand(command, patterns = []) {
  * @returns {{mutating: boolean, reason: string}}
  */
 function classify(toolName, toolInput = {}, { readOnlyAgents = [] } = {}) {
-  if (toolName === 'Task') {
+  if (DISPATCH_TOOLS.includes(toolName)) {
     // A scout or researcher changes nothing; refusing it would block the
     // research that makes a plan worth auditing in the first place.
     const agent = toolInput.subagent_type || toolInput.agent || toolInput.subagentType;
@@ -130,4 +162,5 @@ function classify(toolName, toolInput = {}, { readOnlyAgents = [] } = {}) {
   return { mutating: false, reason: `${toolName} does not change the working tree` };
 }
 
-module.exports = { MUTATING_TOOLS, BASH_MUTATION, ALWAYS_ALLOWED_BASH, classifyBash, classify, isPlanFile, isPlanOnlyCommand };
+module.exports = {
+  DISPATCH_TOOLS, MUTATING_TOOLS, BASH_MUTATION, ALWAYS_ALLOWED_BASH, classifyBash, classify, isPlanFile, isPlanOnlyCommand };
