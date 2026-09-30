@@ -1,6 +1,6 @@
 {
   "name": "duet",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Opus orchestrates, Astra audits. A shared context bundle is handed identically to both, so GPT-6 Astra can check Claude's plan and its delegation decisions \u2014 not just its diffs. A phase then runs unattended: the fix-and-re-audit loop converges on its own, bounded by round caps and a repeated-verdict check, and hooks enforce the gate rather than asking for it. Tickets route across families to Sonnet subagents or GPT-5.6 Sol workers, with cross-family review enforced and a rolling quota guard for subscription billing.",
   "author": {
     "name": "ryan"
