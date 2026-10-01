@@ -4,7 +4,7 @@ const path = require('node:path');
 const phase = require('./phase.js');
 const gate = require('./gate.js');
 const rounds = require('./rounds.js');
-const { CODE_CHECKPOINTS } = require('./audit.js');
+const { CODE_CHECKPOINTS } = require('./checkpoints.js');
 const bundles = require('./bundle.js');
 const { projectDir, ensureDir, readJson, writeJson } = require('./state.js');
 

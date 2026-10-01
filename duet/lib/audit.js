@@ -22,7 +22,7 @@ const rounds = require('./rounds.js');
  * the content was already audited, and had no legal move left but to ask a
  * human to clear the gate.
  */
-const CODE_CHECKPOINTS = Object.freeze(['feature', 'premerge']);
+const { CODE_CHECKPOINTS } = require('./checkpoints.js');
 const { projectDir, ensureDir, writeJson } = require('./state.js');
 
 /**

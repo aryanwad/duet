@@ -56,6 +56,38 @@ function readJsonFlag(flag, fallback) {
 }
 
 const COMMANDS = {
+  /**
+   * The brief a Codex worker is given, and the schema it is held to.
+   *
+   * Exists so the Codex side stops being an improvised prompt string. Both
+   * families now get the same contract from the same source, and the report
+   * comes back in the same shape.
+   */
+  async worker({ positional, flags }) {
+    const workers = require('../lib/worker.js');
+    const sub = positional[1] || 'brief';
+
+    if (sub === 'schema') return out(workers.schemaPath(), false);
+
+    if (sub === 'brief') {
+      const ticket = readJsonFlag(flags.ticket, null)
+        || (flags.ticket && flags.ticket !== true ? { title: String(flags.ticket) } : null);
+      if (!ticket) throw new Error('worker brief needs --ticket \'{"title":"..."}\' or --ticket "<title>"');
+
+      const bundle = bundles.load(flags.bundle && flags.bundle !== true ? flags.bundle : null);
+      if (!bundle) throw new Error('no current bundle: seal one with `duet bundle create` first');
+
+      workers.schemaPath();
+      return out(workers.buildPrompt({
+        ticket,
+        bundleView: bundles.render(bundle),
+        extra: readMaybeFile(flags.extra) || '',
+      }), false);
+    }
+
+    throw new Error(`unknown worker subcommand "${sub}" — try: brief, schema`);
+  },
+
   async bundle({ positional, flags }) {
     const sub = positional[1] || 'show';
     const json = Boolean(flags.json);

@@ -29,6 +29,27 @@ const CLASS_PREFERENCE = Object.freeze({
 
 const OTHER = { anthropic: 'openai', openai: 'anthropic' };
 
+/**
+ * The shipped preference, with any per-class override from config applied.
+ *
+ * Both of the cheap classes default to anthropic, which is the right split
+ * when both subscriptions are healthy and the wrong one when a single family's
+ * budget is what actually constrains the week. Making it configurable turns
+ * "I am running out of credits on one side" from a reason to stop into a
+ * one-line change:
+ *
+ *   duet config set router.classPreference.edit.family openai
+ *
+ * Only the keys given are overridden, so setting a family keeps the class's
+ * effort, and the cross-family review rule is untouched -- independence is the
+ * point of the plugin and is not something a budget should quietly trade away.
+ */
+function preferenceFor(cls, cfg) {
+  const base = CLASS_PREFERENCE[cls] || CLASS_PREFERENCE.edit;
+  const override = ((cfg && cfg.router && cfg.router.classPreference) || {})[cls];
+  return override ? { ...base, ...override } : base;
+}
+
 function assigneeFor(family, cfg) {
   const w = cfg.workers[family];
   return family === 'openai'
@@ -46,7 +67,7 @@ function assigneeFor(family, cfg) {
 function route(ticket, { cfg = config.load(), now = Date.now(), quotaStatus = null } = {}) {
   const classification = classify(ticket);
   const cls = classification.class;
-  const pref = CLASS_PREFERENCE[cls];
+  const pref = preferenceFor(cls, cfg);
   const reasons = [];
 
   let family;
@@ -114,4 +135,5 @@ function routeAll(tickets, options = {}) {
   return tickets.map((t) => route(t, { cfg, now, quotaStatus: openaiStatus }));
 }
 
-module.exports = { CLASS_PREFERENCE, OTHER, route, routeAll, assigneeFor };
+module.exports = {
+  preferenceFor, CLASS_PREFERENCE, OTHER, route, routeAll, assigneeFor };

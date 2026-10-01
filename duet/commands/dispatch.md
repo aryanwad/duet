@@ -30,14 +30,22 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" route --tickets '[{"title":"..."},{"tit
    - **anthropic** — dispatch with the `Task` tool to the `duet-worker`
      subagent. Pass the ticket plus the relevant slice of the bundle.
 
-   - **openai** — run the Codex worker with the routed model, effort and
-     sandbox:
+   - **openai** — build the brief rather than writing one. Both families get
+     the same contract this way, and the report comes back in the same shape:
 
      ```bash
+     node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" worker brief \
+       --ticket '{"title":"...","class":"..."}' > /tmp/duet-ticket-prompt.txt
+
      codex exec -m <model> -c model_reasoning_effort="<effort>" \
        --sandbox <sandbox> \
-       --json -o /tmp/duet-ticket.txt "<ticket + context>"
+       --output-schema "$(node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" worker schema)" \
+       --json -o /tmp/duet-ticket.txt < /tmp/duet-ticket-prompt.txt
      ```
+
+     The schema is what makes the `unsure` field reliable, and that field is
+     the input to the pre-merge audit. A hand-written prompt gets it most of
+     the time, which means the auditor silently gets less on the other tickets.
 
      Then record the spend, once per call. Audits record themselves; worker
      calls are fired by you, so if you skip this the ledger drifts and the

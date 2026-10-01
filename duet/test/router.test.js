@@ -118,3 +118,35 @@ test('routeAll routes a whole batch and preserves order', () => {
   assert.strictEqual(routed[1].ticket.class, 'debug');
   assert.strictEqual(routed[2].ticket.class, 'edit');
 });
+
+/* ---- shifting load to the family that still has budget ---------------- */
+
+test('a class preference can be overridden from config', () => {
+  // The lever for "one subscription is nearly spent": the shipped split sends
+  // read and edit to anthropic, which is wrong when anthropic is the side that
+  // is running out.
+  const shifted = config.deepMerge(config.DEFAULTS, {
+    router: { classPreference: { edit: { family: 'openai' } } },
+  });
+  const r = router.route({ title: 'add a retry to the ledger writer' }, { cfg: shifted });
+  assert.strictEqual(r.family, 'openai');
+});
+
+test('an override changes only the keys it names', () => {
+  const shifted = config.deepMerge(config.DEFAULTS, {
+    router: { classPreference: { hard: { family: 'anthropic' } } },
+  });
+  const pref = router.preferenceFor('hard', shifted);
+  assert.strictEqual(pref.family, 'anthropic');
+  assert.strictEqual(pref.effort, 'high', 'effort follows the class, not the family');
+});
+
+test('cross-family review survives a routing override', () => {
+  // Independence is the plugin's reason to exist; a budget tweak must not
+  // quietly trade it away by letting a family review its own work.
+  const shifted = config.deepMerge(config.DEFAULTS, {
+    router: { classPreference: { review: { family: 'openai' } } },
+  });
+  const r = router.route({ title: 'review the parser change', authoredBy: 'openai' }, { cfg: shifted });
+  assert.strictEqual(r.family, 'anthropic', 'openai wrote it, so openai must not review it');
+});

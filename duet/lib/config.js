@@ -155,6 +155,19 @@ const DEFAULTS = Object.freeze({
   // Matched on the bare name, so `duet-scout` and `duet:duet-scout` both hit.
   // `Explore` and `Plan` are Claude Code's own; both are defined without
   // Edit/Write/NotebookEdit, so neither can carry out work.
+  /**
+   * Per-class routing overrides, empty by default so the shipped preferences
+   * in lib/router.js apply. Shift work to the family whose subscription has
+   * room:
+   *
+   *   duet config set router.classPreference.edit.family openai
+   *   duet config set router.classPreference.read.family openai
+   *
+   * `review` is deliberately not worth overriding: it is decided by the
+   * cross-family rule, which is the plugin's reason to exist.
+   */
+  router: { classPreference: {} },
+
   readOnlyAgents: ['duet-scout', 'duet-researcher', 'duet-summarizer', 'duet-prior-art', 'Explore', 'Plan'],
 
   /**
