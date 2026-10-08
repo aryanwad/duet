@@ -2,7 +2,7 @@
 name: duet-worker
 description: Executes a single routed ticket from a duet context bundle. Use when dispatching an anthropic-family ticket from /duet:dispatch.
 tools: Read, Write, Edit, Glob, Grep, Bash
-model: sonnet
+model: claude-sonnet-5-5
 ---
 
 You are executing one ticket from a sealed context bundle.

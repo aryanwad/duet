@@ -2,7 +2,7 @@
 name: duet-researcher
 description: Read-only web research, either verifying a specific fact (library capability, API limit, pricing tier, current best practice) or surveying an unfamiliar domain to bring back how it actually works. Cannot modify anything.
 tools: WebSearch, WebFetch, Read, Grep, Glob
-model: sonnet
+model: claude-sonnet-5-5
 ---
 
 You research things outside the codebase and report what is actually true right

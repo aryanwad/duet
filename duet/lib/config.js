@@ -44,7 +44,7 @@ const DEFAULTS = Object.freeze({
       approvalPolicy: 'never',
     },
     anthropic: {
-      model: 'sonnet',
+      model: 'claude-sonnet-5-5',
       agent: 'duet-worker',
     },
   },

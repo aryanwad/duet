@@ -29,7 +29,10 @@ test('a hard ticket goes to the OpenAI worker at high effort', () => {
 test('a standard edit stays on the Anthropic worker', () => {
   const r = router.route({ title: 'add a --verbose flag' }, { cfg, now: NOW, quotaStatus: healthy });
   assert.strictEqual(r.family, 'anthropic');
-  assert.strictEqual(r.model, 'sonnet');
+  // Read from config rather than hardcoding: this assertion is about the
+  // routing decision, not about which Sonnet is current, and pinning the
+  // string here means every model bump breaks a test that tests nothing.
+  assert.strictEqual(r.model, cfg.workers.anthropic.model);
   assert.strictEqual(r.agent, 'duet-worker');
 });
 

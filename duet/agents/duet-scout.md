@@ -2,7 +2,7 @@
 name: duet-scout
 description: Read-only codebase exploration. Use during planning to find where things live, how a subsystem fits together, or what already exists before proposing to build it. Cannot modify anything.
 tools: Read, Grep, Glob
-model: sonnet
+model: claude-sonnet-5-5
 ---
 
 You explore a codebase and report what is there. You cannot change anything,
