@@ -23,8 +23,8 @@ reading the JSON out. The ones worth checking:
 
 | key | shipped | means |
 |---|---|---|
-| `audit.maxRounds` | `3` | fix-and-re-audit rounds at plan, and per task at feature |
-| `audit.maxRoundsByCheckpoint.premerge` | `7` | the final review gets more rope |
+| `audit.maxRounds` | `2` | fix-and-re-audit rounds at plan, and per task at feature |
+| `audit.maxRoundsByCheckpoint.premerge` | `3` | the final review gets one extra round |
 | `audit.onCap` | `proceed` | at the cap, open the gate and record the findings |
 | `audit.stopOnRepeat` | `true` | identical findings twice ends the loop early |
 | `audit.autoContinue` | `true` | the Stop hook holds the turn open mid-phase |

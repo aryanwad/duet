@@ -377,8 +377,9 @@ test('a per-checkpoint override beats the global cap', () => {
     audit: { maxRounds: 5, maxRoundsByCheckpoint: { plan: 2 } },
   });
   assert.strictEqual(rounds.maxFor('plan', cfg), 2);
-  // premerge keeps its own default of 7 — the final review gets more rope.
-  assert.strictEqual(rounds.maxFor('premerge', cfg), 7);
+  // premerge keeps its own shipped default — the final review gets its own cap,
+  // read from config so retuning it does not break a test about precedence.
+  assert.strictEqual(rounds.maxFor('premerge', cfg), config.DEFAULTS.audit.maxRoundsByCheckpoint.premerge);
   assert.strictEqual(rounds.maxFor('batch', cfg), 5, 'anything without an override falls back to maxRounds');
 });
 

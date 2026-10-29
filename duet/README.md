@@ -302,23 +302,23 @@ Borrowed from [loop_eng](https://github.com/sdsrss/loop_eng), which bounds its
 loop with six stop rules rather than a round count alone. "Same failure twice"
 is the one that pays for itself immediately.
 
-**A round cap backstops it.** `audit.maxRounds` (default 5) bounds the argument,
-per checkpoint, per cycle. The pre-merge review gets 7 — by then the work
-exists, the findings are concrete, and each round is a real edit against a real
-diff. Refused calls are not rounds, so the cap only counts times something
-genuinely moved.
+**A round cap backstops it.** `audit.maxRounds` (default 2) bounds the argument,
+per checkpoint, per cycle — at plan, and per task at feature. The pre-merge
+review gets 3: by then the work exists and the findings are concrete, so one
+extra round against a real diff is worth having. Refused calls are not rounds,
+so the cap only counts times something genuinely moved.
 
 Worth knowing what that costs: a phase that fights all the way through both
-checkpoints can want 5 + 7 = 12 auditor calls, against a rolling budget of 24
-per 5 hours with 2 held in reserve. Two contentious phases will exhaust the
-window. `duet quota show` is where to look when an audit starts getting
+checkpoints wants 2 + 3 = 5 auditor calls, plus 2 per contested task at the
+feature checkpoint, against a rolling budget of 24 per 5 hours with 2 held in
+reserve. A phase with many contested tickets is what exhausts the window. `duet quota show` is where to look when an audit starts getting
 skipped mid-phase.
 
 When the cap is reached with the verdict still `block`, `audit.onCap` decides:
 
 - `proceed` (default) — duet opens the gate itself, records the outstanding
-  findings as an escalation, and lets the work continue. Five rounds of
-  disagreement is evidence a sixth will not settle it.
+  findings as an escalation, and lets the work continue. Two rounds of
+  disagreement is evidence a third will not settle it.
 - `halt` — the gate stays closed and an unattended phase stops there.
 
 Proceeding is never silent. The cycle is marked, the findings are kept, and
@@ -326,7 +326,7 @@ both `duet dash` and `/duet:brief` lead with the fact that a phase shipped with
 a finding open. "Proceed" must not quietly become "forget".
 
 ```bash
-duet config set audit.maxRounds 3
+duet config set audit.maxRounds 4
 duet config set audit.onCap halt
 ```
 

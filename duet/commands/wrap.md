@@ -90,8 +90,8 @@ Then repeat until it passes or the cap is reached. Each round:
 
 4. **Audit again**, naming in `--extra` what you changed and what you disputed.
 
-The command prints `round: N of M`. The cap is 5 by default, per checkpoint,
-per cycle. Re-runs that would show Astra nothing new are refused and cost
+The command prints `round: N of M`. The cap is 2 by default (3 at pre-merge),
+per checkpoint, per cycle. Re-runs that would show Astra nothing new are refused and cost
 nothing, so the cap only counts rounds where something genuinely moved.
 
 **When the cap is reached and the verdict is still `block`,** duet opens the

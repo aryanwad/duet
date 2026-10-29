@@ -56,7 +56,8 @@ session; burning it on a mid-session check is usually the wrong trade.
    of a fix corrupts the one record that does. A passing re-audit reopens the
    gate on its own, recorded as addressed rather than overridden.
 
-   The round cap (5 per checkpoint per cycle, `audit.maxRounds`) ends the loop
+   The round cap (2 per checkpoint per cycle, 3 at pre-merge; `audit.maxRounds`)
+   ends the loop
    if it does not converge: duet opens the gate itself, keeps the outstanding
    findings on the record, and prints `PROCEEDING PAST THE CAP`. Report that
    prominently — it is the one outcome the user will care about most.

@@ -23,8 +23,8 @@ It opens by itself, two ways, and both are automatic:
 
 - **You fix what was flagged and re-review.** A passing verdict reopens the
   gate and records it as *addressed*, which is the outcome worth having.
-- **The loop runs out of rounds** — three per task at the feature checkpoint,
-  three at plan, seven at pre-merge, or the same findings twice running. duet
+- **The loop runs out of rounds** — two per task at the feature checkpoint,
+  two at plan, three at pre-merge, or the same findings twice running. duet
   then opens the gate itself and records the outstanding findings as an
   escalation that `/duet:brief` and the dashboard both lead with.
 

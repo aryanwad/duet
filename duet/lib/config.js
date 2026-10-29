@@ -100,7 +100,7 @@ const DEFAULTS = Object.freeze({
      * A thirty-task phase sharing one budget meant the later tasks got
      * unenforced reviews, which is the opposite of what a cap is for.
      */
-    maxRoundsByCheckpoint: { premerge: 7 },
+    maxRoundsByCheckpoint: { premerge: 3 },
 
     onCap: 'proceed',
 

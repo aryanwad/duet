@@ -211,7 +211,7 @@ const COMMANDS = {
           'Options:',
           '  duet gate clear --reason "..."      accept the outstanding findings and proceed',
           '  duet audit <checkpoint> --force     buy another round',
-          '  duet config set audit.maxRounds 8   raise the cap for future cycles',
+          '  duet config set audit.maxRounds 4   raise the cap for future cycles',
         ].join('\n'), false);
       }
       return out(`audit skipped: ${result.reason}`, false);
