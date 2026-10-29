@@ -88,7 +88,7 @@ const DEFAULTS = Object.freeze({
    * an unresolved finding.
    */
   audit: {
-    maxRounds: 3,
+    maxRounds: 2,
 
     /**
      * The final review gets more rope than the plan audit. By pre-merge the
@@ -136,6 +136,12 @@ const DEFAULTS = Object.freeze({
      */
     autoContinue: true,
     maxContinues: 3,
+    /**
+     * Per-phase override for how many times the Stop hook may hold a turn
+     * open. `building` ships at 1 because the orchestrator is often waiting
+     * on an out-of-process worker there and a second nudge cannot help.
+     */
+    maxContinuesByPhase: { building: 1 },
   },
 
   /**

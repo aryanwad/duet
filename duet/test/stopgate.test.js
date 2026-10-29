@@ -329,3 +329,62 @@ test('a blocked PLAN review is still told to re-seal', () => {
   assert.match(action, /reseal/, 'the plan is sealed inside the bundle — the edit alone is invisible');
   assert.match(action, /duet audit plan/);
 });
+
+/* ---- waiting on a worker is not stalling ------------------------------ */
+
+function building(cwd) {
+  phase.start({ cwd });
+  for (const p of ['sealed', 'audited', 'building']) phase.set(p, { cwd });
+}
+
+test('building nudges once, then lets the turn end', () => {
+  // The orchestrator dispatched a Codex worker and is waiting for it to
+  // report. Nothing it can do until then, so the situation never changes --
+  // and the gate used to hold the turn open three times anyway, collecting
+  // the same honest "I am still blocked" each time. Three model turns to
+  // reach the answer available at the first.
+  const cwd = project();
+  building(cwd);
+
+  const first = stopgate.decide({ cwd, cfg: CFG, now: tick() });
+  assert.strictEqual(first.block, true, 'one nudge is useful: a ticket may be undispatched');
+
+  const second = stopgate.decide({ cwd, cfg: CFG, now: tick() });
+  assert.strictEqual(second.block, false, 'a second nudge cannot help and costs a turn');
+});
+
+test('other phases keep the full continue budget', () => {
+  // Only `building` waits on another process. `built` is work the orchestrator
+  // can actually do, so standing still there is a stall worth pushing on.
+  const cwd = project();
+  phase.start({ cwd });
+  for (const p of ['sealed', 'audited', 'building', 'built']) phase.set(p, { cwd });
+
+  assert.strictEqual(stopgate.decide({ cwd, cfg: CFG, now: tick() }).block, true);
+  assert.strictEqual(stopgate.decide({ cwd, cfg: CFG, now: tick() }).block, true);
+  assert.strictEqual(stopgate.decide({ cwd, cfg: CFG, now: tick() }).block, true);
+});
+
+test('the building nudge admits waiting and forbids polling', () => {
+  // The old text asserted "Tickets are still in flight. Finish them" -- a
+  // claim duet cannot check, and an instruction that is impossible when the
+  // worker runs elsewhere. Told to finish something it cannot finish, the
+  // orchestrator either invents work or learns to poll.
+  const cwd = project();
+  building(cwd);
+
+  const action = stopgate.nextAction({ cwd, cfg: CFG });
+  assert.match(action, /legitimate end to the turn/i, 'waiting must be a named, allowed outcome');
+  assert.match(action, /Do not poll/i);
+  assert.match(action, /duet phase set built/);
+  assert.doesNotMatch(action, /Finish them/i, 'do not order work the orchestrator cannot do');
+});
+
+test('a phase ceiling narrows the default but an explicit one wins', () => {
+  assert.strictEqual(stopgate.ceilingFor('building', {}, 3), 1);
+  assert.strictEqual(stopgate.ceilingFor('built', {}, 3), 3);
+  assert.strictEqual(
+    stopgate.ceilingFor('building', { audit: { maxContinuesByPhase: { building: 5 } } }, 3), 5,
+    'config must be able to put it back',
+  );
+});

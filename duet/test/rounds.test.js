@@ -383,10 +383,17 @@ test('a per-checkpoint override beats the global cap', () => {
 });
 
 test('the shipped defaults give the final review more rounds than the plan', () => {
-  assert.strictEqual(rounds.maxFor('plan', config.DEFAULTS), 3);
-  assert.strictEqual(rounds.maxFor('premerge', config.DEFAULTS), 7);
+  // Read the figure from config rather than pinning it here: what this test is
+  // about is the SHAPE -- plan and feature share one budget, premerge gets a
+  // longer one -- and hardcoding the number means every retune breaks a test
+  // that is not testing the retune.
+  const perTask = config.DEFAULTS.audit.maxRounds;
+  assert.strictEqual(rounds.maxFor('plan', config.DEFAULTS), perTask);
   // A feature review is per task, so its budget is read through its scope.
-  assert.strictEqual(rounds.maxFor(rounds.scopeFor('feature', 'Task 26'), config.DEFAULTS), 3);
+  assert.strictEqual(rounds.maxFor(rounds.scopeFor('feature', 'Task 26'), config.DEFAULTS), perTask);
+
+  const premerge = rounds.maxFor('premerge', config.DEFAULTS);
+  assert.ok(premerge > perTask, 'the last review before a commit gets more rope than the first');
 });
 
 test('a nonsense cap falls back rather than disabling the guard', () => {

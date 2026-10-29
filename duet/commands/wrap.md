@@ -136,6 +136,11 @@ final gate and the reason that call is worth making.
 
 Work the whole phase. Do not stop between tickets to check in.
 
+A worker running in another process reports when it is done. Waiting for that
+is not stalling — say what you are waiting on and end the turn. Do not poll it,
+re-run it, or re-read its output on a loop; the completion message arrives on
+its own and every check costs a turn.
+
 **At each feature boundary, run `/duet:commit` and drive its review loop
 yourself.** Never stop to ask whether to clear a gate — the gate opens on a
 passing re-review, or duet opens it at the cap. Pass `--task` so the budget is that task's own 3 rounds rather than

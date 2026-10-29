@@ -56,6 +56,9 @@ function main() {
         '  An ambiguous ticket is resolved by picking the reading that fits the sealed plan',
         '  and saying which you picked — not by stopping.',
         '  duet refusals name their own next step; follow it rather than escalating.',
+        '  A dispatched worker reports when it is done. Waiting for that is a legitimate',
+        '  end to a turn: say what you are waiting on and stop. Do not poll it, re-run it,',
+        '  or re-read its output on a loop — each check spends a turn to learn nothing.',
         '  The user is consulted twice: agreeing the plan, and reporting the finished phase.',
       ].join('\n'));
     }

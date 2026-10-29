@@ -43,6 +43,30 @@ const FILE = 'stop-gate.json';
 /** How many times to refuse a stop at the *same* state before giving up. */
 const DEFAULT_MAX_CONTINUES = 3;
 
+/**
+ * Phases where holding the turn open a second time cannot help.
+ *
+ * In `building` the orchestrator is often waiting on an out-of-process worker
+ * -- a backgrounded `codex exec`, a long subagent -- and has nothing it can do
+ * until that worker reports. The gate used to nudge three times anyway, and
+ * because the situation never changed, all three said the same thing and got
+ * the same honest answer back: "I am still blocked." Three full model turns
+ * spent to reach the conclusion available at the first one.
+ *
+ * So `building` gets one nudge. If the orchestrator is standing still because
+ * a ticket was never dispatched, one reminder is enough to restart it; if it
+ * is standing still because it is waiting, one reminder is already one too
+ * many.
+ */
+const DEFAULT_MAX_CONTINUES_BY_PHASE = Object.freeze({ building: 1 });
+
+function ceilingFor(phase, cfg, fallback) {
+  const configured = (cfg?.audit?.maxContinuesByPhase || {})[phase];
+  if (Number.isFinite(configured) && configured > 0) return configured;
+  const shipped = DEFAULT_MAX_CONTINUES_BY_PHASE[phase];
+  return Number.isFinite(shipped) && shipped > 0 ? shipped : fallback;
+}
+
 /** Re-fires inside this window replay the previous answer without counting. */
 const DEDUP_MS = 1500;
 
@@ -160,7 +184,28 @@ function nextAction({ cwd = process.cwd(), cfg } = {}) {
     case 'audited':
       return 'The plan audit passed and no work has started. Build the task list from the\nre-sealed bundle and dispatch the tickets.';
     case 'building':
-      return 'Tickets are still in flight. Finish them, then:\n  duet phase set built';
+      /**
+       * This used to assert "Tickets are still in flight. Finish them" -- a
+       * claim duet cannot actually check, followed by an instruction the
+       * orchestrator cannot follow when the thing it is waiting on runs in
+       * another process. Waiting is a legitimate way for a turn to end, and a
+       * gate that refuses to admit that teaches polling instead.
+       */
+      return [
+        'This phase is mid-build. Two cases, and only you can tell which:',
+        '',
+        '  - A ticket has not been dispatched yet -> dispatch it now.',
+        '  - Everything is dispatched and a worker has not reported back ->',
+        '    that is a legitimate end to the turn. Say what you are waiting on',
+        '    and stop.',
+        '',
+        'Do not poll. Do not re-run the worker, re-read its output file on a',
+        'loop, or check whether it is done -- its completion message arrives on',
+        'its own, and every check spends a turn to learn nothing.',
+        '',
+        'Once every worker has reported:',
+        '  duet phase set built',
+      ].join('\n');
     case 'built':
       return 'The work is done and has not had its pre-merge review. Re-seal so the bundle\nreflects what was built, then run it:\n  duet bundle reseal --tickets \'[...]\' --note "as built"\n  duet audit premerge --extra "<what you are least sure about>"';
     case 'verified':
@@ -184,7 +229,7 @@ function decide({ cwd = process.cwd(), cfg, now = Date.now(), maxContinues } = {
   try {
     if (cfg?.audit?.autoContinue === false) return allow('autoContinue is off');
 
-    const ceiling = Number.isFinite(maxContinues) && maxContinues > 0
+    const baseCeiling = Number.isFinite(maxContinues) && maxContinues > 0
       ? maxContinues
       : (Number.isFinite(cfg?.audit?.maxContinues) && cfg.audit.maxContinues > 0
         ? cfg.audit.maxContinues
@@ -192,6 +237,12 @@ function decide({ cwd = process.cwd(), cfg, now = Date.now(), maxContinues } = {
 
     const cycle = phase.status(cwd);
     if (!cycle.active) return allow('no duet cycle is running here');
+
+    // An explicit maxContinues argument is a caller override and wins; a phase
+    // ceiling only narrows the configured default.
+    const ceiling = Number.isFinite(maxContinues) && maxContinues > 0
+      ? maxContinues
+      : ceilingFor(cycle.phase, cfg, baseCeiling);
 
     const state = readJson(statePath(cwd), null) || {};
     const sig = signature(cwd);
@@ -274,4 +325,5 @@ function reset(cwd = process.cwd()) {
   writeState(cwd, { blocks: 0, lastBlocked: false, lastSignature: null, lastAt: null });
 }
 
-module.exports = { FILE, DEFAULT_MAX_CONTINUES, DEDUP_MS, cycleId, statePath, signature, nextAction, decide, reset };
+module.exports = {
+  ceilingFor, DEFAULT_MAX_CONTINUES_BY_PHASE, FILE, DEFAULT_MAX_CONTINUES, DEDUP_MS, cycleId, statePath, signature, nextAction, decide, reset };

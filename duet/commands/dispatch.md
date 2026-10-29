@@ -55,5 +55,12 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" route --tickets '[{"title":"..."},{"tit
      node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" quota record <model> worker
      ```
 
-6. Collect the results. If the audit mode is `plan-batch-premerge`, run
+6. **Wait, do not poll.** A backgrounded worker reports when it finishes. Until
+   then there is nothing to verify, so re-reading its output file, re-running
+   it, or asking whether it is done spends a turn each time to learn nothing.
+   If every ticket is dispatched and you are waiting, say what you are waiting
+   on and end the turn — duet's Stop hook nudges once in `building` and then
+   stands down, precisely so that waiting is not punished.
+
+7. Collect the results. If the audit mode is `plan-batch-premerge`, run
    `/duet:audit batch` once the batch completes.
