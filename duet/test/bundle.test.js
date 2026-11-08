@@ -90,3 +90,73 @@ test('render is deterministic for identical content', () => {
     bundles.render(b).replace(b.id, 'ID'),
   );
 });
+
+/* ---- the ticket view: what a worker is given -------------------------- */
+
+function bigBundle() {
+  return bundles.create({
+    brief: 'Ship the settlement path',
+    plan: { summary: 'Bring acceptance to green.', steps: ['step one', 'step two', 'SECRET_STEP_MARKER'] },
+    tickets: [
+      { title: 'Task 1: the limiter', class: 'edit', rationale: 'standard change' },
+      { title: 'Task 2: the ledger', class: 'hard', rationale: 'touches settlement' },
+      { title: 'Task 3: the oracle', class: 'debug', rationale: 'OTHER_TICKET_MARKER' },
+    ],
+    constraints: ['no new deps'],
+    notes: ['note one', 'note two'],
+    cwd: process.cwd(),
+  });
+}
+
+test('a worker sees its own ticket, not the other tickets', () => {
+  // Briefing every worker with the whole bundle is not only waste -- measured
+  // at ~135k tokens of input across a 32-ticket phase -- it hands each worker
+  // 31 tickets it has been told not to touch.
+  const b = bigBundle();
+  const view = bundles.renderFor(b, { ticket: b.content.tickets[1] });
+
+  assert.match(view, /Task 2: the ledger/);
+  assert.match(view, /touches settlement/, 'its own routing rationale is useful');
+  assert.doesNotMatch(view, /OTHER_TICKET_MARKER/, 'another ticket\'s rationale is not');
+  assert.doesNotMatch(view, /SECRET_STEP_MARKER/, 'the full step list is the plan, not this ticket');
+  assert.doesNotMatch(view, /note one/, 're-seal lineage means nothing to a worker');
+});
+
+test('the ticket view keeps what a worker needs to stay in bounds', () => {
+  const b = bigBundle();
+  const view = bundles.renderFor(b, { ticket: b.content.tickets[0] });
+
+  assert.match(view, /Ship the settlement path/, 'what the phase is for');
+  assert.match(view, /no new deps/, 'constraints are binding on the worker');
+  assert.match(view, /Bring acceptance to green/, 'the goal, without every step');
+  assert.match(view, new RegExp(b.hash.slice(0, 16)), 'traceable to an exact bundle');
+  assert.match(view, /ticket 1 of 3/, 'where it sits, so it knows others exist');
+  assert.match(view, /do not do them/i);
+});
+
+test('the ticket view is a fraction of the audit view', () => {
+  const b = bigBundle();
+  const full = bundles.render(b);
+  const slice = bundles.renderFor(b, { ticket: b.content.tickets[1] });
+  assert.ok(slice.length < full.length, 'the whole point');
+});
+
+test('the auditor still sees everything — that is the integrity guarantee', () => {
+  // render() must not be trimmed: the audit prompt tells Astra it is seeing
+  // exactly what the orchestrator saw, and that claim has to stay true.
+  const b = bigBundle();
+  const full = bundles.render(b);
+  assert.match(full, /OTHER_TICKET_MARKER/);
+  assert.match(full, /SECRET_STEP_MARKER/);
+});
+
+test('rendered notes are bounded but their absence is declared', () => {
+  const many = Array.from({ length: 20 }, (_, i) => `revision ${i + 1}`);
+  const b = bundles.create({ brief: 'x', plan: null, tickets: [], notes: many, cwd: process.cwd() });
+  const view = bundles.render(b);
+
+  assert.match(view, /revision 20/, 'the most recent are what matter');
+  assert.doesNotMatch(view, /revision 1\b/, 'the oldest are not re-sent every round');
+  assert.match(view, /earlier note\(s\) omitted/, 'never silently drop context — say it was dropped');
+  assert.strictEqual(b.content.notes.length, 20, 'full lineage still stored on disk');
+});

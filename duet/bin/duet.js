@@ -78,9 +78,12 @@ const COMMANDS = {
       if (!bundle) throw new Error('no current bundle: seal one with `duet bundle create` first');
 
       workers.schemaPath();
+      // The ticket view, not the full bundle: a worker executes one ticket and
+      // is told not to touch the others, so briefing it with all of them is
+      // both waste and temptation. The auditor still gets render() in full.
       return out(workers.buildPrompt({
         ticket,
-        bundleView: bundles.render(bundle),
+        bundleView: bundles.renderFor(bundle, { ticket }),
         extra: readMaybeFile(flags.extra) || '',
       }), false);
     }

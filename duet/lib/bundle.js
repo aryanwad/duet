@@ -22,6 +22,9 @@ const { projectDir, ensureDir, writeJson, readJson, writeAtomic } = require('./s
 
 const SCHEMA_VERSION = 1;
 
+/** How many re-seal notes the rendered view carries. See render(). */
+const RENDER_NOTE_LIMIT = 5;
+
 function bundlesDir(cwd) {
   return path.join(projectDir(cwd), 'bundles');
 }
@@ -330,9 +333,104 @@ function render(bundle) {
   lines.push('');
 
   if (c.notes.length) {
+    /**
+     * Notes are re-seal lineage, and they only ever grow: every re-seal appends
+     * one, and the whole list was re-sent to the auditor on every round. On a
+     * long phase that is a few hundred tokens of "addressed: ..." history
+     * re-read many times, and none of it changes the judgement being asked for.
+     *
+     * The full list stays in the bundle JSON, so lineage is still inspectable
+     * on disk. Only the rendered view is bounded.
+     */
+    const shown = c.notes.slice(-RENDER_NOTE_LIMIT);
+    const hidden = c.notes.length - shown.length;
     lines.push('## Notes');
     lines.push('');
-    for (const n of c.notes) lines.push(`- ${n}`);
+    if (hidden > 0) lines.push(`_${hidden} earlier note(s) omitted; full lineage is in the bundle file._`);
+    for (const n of shown) lines.push(`- ${n}`);
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * The slice of a bundle that bears on ONE ticket.
+ *
+ * `render()` exists so the auditor sees exactly what the orchestrator saw --
+ * that is the integrity guarantee and it must not be trimmed. A worker is in a
+ * different position: it executes one ticket, and the contract it is given
+ * says in so many words to do that ticket and not the adjacent improvements it
+ * notices. Handing it all 32 tickets, every rationale, the whole step list and
+ * the re-seal history is therefore not just waste, it is 31 tickets' worth of
+ * invitation to do something else.
+ *
+ * Measured on a 32-ticket phase: the full view is ~3,900 tokens, so briefing
+ * every worker with it costs ~135,000 tokens of input per phase, of which the
+ * overwhelming majority is context the worker must not act on.
+ *
+ * What a worker actually needs is kept: what the phase is for, the constraints
+ * it must stay inside, the state of the tree it is about to change, its own
+ * ticket in full, and where that ticket sits in the whole. The bundle hash
+ * comes too, so its output is still traceable to an exact bundle version.
+ */
+function renderFor(bundle, { ticket = null, index = null } = {}) {
+  const c = bundle.content;
+  const all = c.tickets || [];
+  const i = Number.isInteger(index) ? index : all.findIndex((t) => t && ticket && t.title === ticket.title);
+  const mine = ticket || (i >= 0 ? all[i] : null);
+
+  const lines = [];
+  lines.push(`# Context bundle \`${bundle.id}\` (ticket view)`);
+  lines.push('');
+  lines.push(`Integrity: \`sha256:${bundle.hash}\``);
+  lines.push('');
+  lines.push('## Brief');
+  lines.push('');
+  lines.push(c.brief);
+  lines.push('');
+
+  if ((c.constraints || []).length) {
+    lines.push('## Constraints');
+    lines.push('');
+    for (const item of c.constraints) lines.push(`- ${item}`);
+    lines.push('');
+  }
+
+  lines.push('## Goal of this phase');
+  lines.push('');
+  lines.push(c.plan && c.plan.summary ? c.plan.summary : '_No plan summary recorded._');
+  lines.push('');
+
+  lines.push('## Repository state');
+  lines.push('');
+  if (!c.repo || !c.repo.tracked) {
+    lines.push('_Not a git repository._');
+  } else {
+    lines.push(`- branch: \`${c.repo.branch}\``);
+    lines.push(`- HEAD: \`${c.repo.head}\``);
+    lines.push(`- working tree: ${c.repo.dirty ? `dirty (${c.repo.changed.length} file(s))` : 'clean'}`);
+  }
+  lines.push('');
+
+  lines.push('## Your ticket');
+  lines.push('');
+  if (!mine) {
+    lines.push('_No ticket supplied._');
+  } else {
+    lines.push(`**${mine.title}**`);
+    if (mine.description) { lines.push(''); lines.push(mine.description); }
+    const meta = [mine.class && `class: ${mine.class}`, mine.effort && `effort: ${mine.effort}`]
+      .filter(Boolean).join(' · ');
+    if (meta) { lines.push(''); lines.push(meta); }
+    if (mine.rationale) { lines.push(''); lines.push(`Why it was routed to you: ${mine.rationale}`); }
+  }
+  lines.push('');
+
+  if (all.length > 1) {
+    const where = i >= 0 ? `ticket ${i + 1} of ${all.length}` : `one of ${all.length} tickets`;
+    lines.push(`_This is ${where} in this phase. The others are being worked separately —`);
+    lines.push('do not do them, and do not change what they touch._');
     lines.push('');
   }
 
@@ -340,6 +438,8 @@ function render(bundle) {
 }
 
 module.exports = {
+  RENDER_NOTE_LIMIT,
+  renderFor,
   SCHEMA_VERSION,
   bundlesDir,
   canonicalize,
