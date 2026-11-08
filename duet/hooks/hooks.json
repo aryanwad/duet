@@ -1,5 +1,5 @@
 {
-  "description": "duet: SessionStart surfaces audit-gate readiness and registers the project for the dashboard; PreToolUse refuses work that arrives before the plan audit or while a blocking verdict stands; PostToolUse starts a cycle when an approved plan is written; Stop keeps a mid-phase cycle running instead of handing the turn back; Subagent hooks log dispatches so the dashboard knows which agents ran.",
+  "description": "duet: SessionStart surfaces audit-gate readiness and registers the project for the dashboard; PreToolUse refuses work that arrives before the plan audit or while a blocking verdict stands; PostToolUse starts a cycle when an approved plan is written; Stop keeps a mid-phase cycle running instead of handing the turn back; Subagent hooks log dispatches so the dashboard knows which agents ran; PreCompact records the cycle's state so SessionStart can hand it back after compaction.",
   "hooks": {
     "SessionStart": [
       {
@@ -14,7 +14,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Task|Bash|PowerShell",
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Task|Agent|Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
@@ -64,6 +64,17 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-gate.js\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-compact.js\"",
             "timeout": 10
           }
         ]

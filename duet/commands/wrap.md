@@ -104,6 +104,22 @@ Redirects apply automatically and re-seal the bundle themselves. Report what
 moved and why. If you think a reassignment is wrong, say so with your reasoning
 — but it has already been applied, and that is deliberate.
 
+## 4b. Hand off, then clear
+
+The plan is agreed and nothing from the audit argument needs carrying. This is
+the first of two boundaries where the context is worth resetting deliberately
+rather than letting compaction do it badly later:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" handoff write \
+  --next "Plan audit passed, bundle re-sealed as <id>. Dispatch all N tickets in parallel. <anything the next session must not re-litigate>"
+```
+
+Then tell the user to type `/clear`. duet cannot clear context itself — that is
+user-initiated and no hook can trigger it — but the moment they do, duet's
+SessionStart hook hands the file straight back, so nothing is lost. Carry on
+from step 5 in the fresh session.
+
 ## 5. Task list, from the re-sealed bundle
 
 Use `TaskCreate`, one task per ticket, in the bundle's order, taken from the
@@ -132,7 +148,24 @@ Work the tickets from the **re-sealed** bundle:
   then `node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" quota record <model> worker`
 
 Collect each worker's "what I am unsure about" section. It is the input to the
-final gate and the reason that call is worth making.
+final gate and the reason that call is worth making. Read it as a digest
+rather than raw output, so the worker's prose never enters your context:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" worker report \
+  --file /tmp/duet-t.txt --ticket "<ticket title>"
+```
+
+**Dispatch the tickets rather than doing them yourself.** A file you read or
+edit stays in your context and is re-read on every turn that follows; the same
+work in a worker is read once and discarded with it. duet enforces a ratio
+here — past `limits.editsPerDispatch` inline edits since your last dispatch,
+the hook refuses, and each dispatch clears the allowance.
+
+**Dispatch independent tickets in parallel, in one message.** Several worker
+calls issued together run concurrently; one per message runs them in series and
+spends an extra orchestrator turn — at full context — on every round trip. Only
+sequence what has a real dependency.
 
 Work the whole phase. Do not stop between tickets to check in.
 
@@ -189,6 +222,19 @@ user's.
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" phase stop
 ```
+
+## 8b. Hand off again, then clear
+
+The cycle is closed. Before the next one, record what carries over:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" handoff write \
+  --next "<what the next phase should start with>" \
+  --notes "<anything that shipped with a finding open, and why>"
+```
+
+Then `/clear`. A new phase in a fresh context is the whole reason the previous
+one is allowed to run unattended.
 
 ## 9. Report, then ask for the next phase
 

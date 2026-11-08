@@ -57,6 +57,46 @@ function readJsonFlag(flag, fallback) {
 
 const COMMANDS = {
   /**
+   * Write or show the handoff that survives a context clear.
+   *
+   * duet cannot clear context -- /clear is user-initiated and no hook triggers
+   * it -- so this writes the file and says what to type. The SessionStart hook
+   * does the rehydration on the other side without being asked.
+   */
+  async handoff({ positional, flags }) {
+    const handoff = require('../lib/handoff.js');
+    const sub = positional[1] || 'show';
+    const agent = flags.agent && flags.agent !== true ? String(flags.agent) : 'orchestrator';
+    const json = Boolean(flags.json);
+
+    if (sub === 'write') {
+      const next = readMaybeFile(flags.next) || '';
+      if (!next.trim()) {
+        throw new Error('handoff write needs --next "<what the next session should do first>"\n' +
+          '  This is the one part duet cannot infer, and it is the whole point of the file.');
+      }
+      const r = handoff.write({ next, notes: readMaybeFile(flags.notes) || '', agent });
+      if (json) return out(r, true);
+      return out(
+        `handoff written for "${agent}" (${r.chars}/${r.cap} chars${r.truncated ? ', TRIMMED to fit' : ''})\n` +
+        `  ${r.file}\n\n` +
+        '  Now type /clear. The next session picks this up automatically —\n' +
+        '  duet cannot clear context for you, that keystroke is yours.',
+        false,
+      );
+    }
+
+    if (sub === 'show') {
+      const t = handoff.read(agent);
+      return out(t || `no handoff recorded for "${agent}"`, false);
+    }
+
+    if (sub === 'list') return out(handoff.list().join('\n') || '(none)', false);
+
+    throw new Error(`unknown handoff subcommand "${sub}" — try: write, show, list`);
+  },
+
+  /**
    * The brief a Codex worker is given, and the schema it is held to.
    *
    * Exists so the Codex side stops being an improvised prompt string. Both
@@ -66,6 +106,7 @@ const COMMANDS = {
   async worker({ positional, flags }) {
     const workers = require('../lib/worker.js');
     const sub = positional[1] || 'brief';
+    const json = Boolean(flags.json);
 
     if (sub === 'schema') return out(workers.schemaPath(), false);
 
@@ -88,7 +129,18 @@ const COMMANDS = {
       }), false);
     }
 
-    throw new Error(`unknown worker subcommand "${sub}" — try: brief, schema`);
+    if (sub === 'report') {
+      // Read the worker's reply and print only what the orchestrator must
+      // carry. The prose stays on disk; the digest is what enters context.
+      const file = flags.file && flags.file !== true ? flags.file : null;
+      if (!file) throw new Error('worker report needs --file <the worker output file>');
+      const raw = require('node:fs').readFileSync(file, 'utf8');
+      const d = workers.digest(raw);
+      const ticket = flags.ticket && flags.ticket !== true ? String(flags.ticket) : '';
+      return out(json ? d : workers.renderDigest(d, { ticket }), json);
+    }
+
+    throw new Error(`unknown worker subcommand "${sub}" — try: brief, schema, report`);
   },
 
   async bundle({ positional, flags }) {

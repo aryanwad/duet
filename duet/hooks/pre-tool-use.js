@@ -190,6 +190,42 @@ async function main() {
     );
   }
 
+  /**
+   * The dispatch ratio.
+   *
+   * Placed after the plan-file and blocked-gate exemptions on purpose: both of
+   * those exit before here, so the sanctioned inline edits -- revising the plan,
+   * fixing what a code review flagged -- are neither counted nor refused. Put
+   * it earlier and the guard refuses the very fix the gate is demanding; a
+   * test pins that ordering.
+   */
+  const guard = require('../lib/dispatchguard.js');
+  if (/^dispatches /.test(verdict.reason)) {
+    guard.recordDispatch(cwd);
+  } else if (['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(toolName)
+             && !/\.(md|markdown)$/i.test(String(target || ''))) {
+    /**
+     * Markdown is exempt. Writing the plan, revising CLAUDE.md, recording a
+     * handoff and taking notes ARE the orchestrator's job -- counting them
+     * against a guard meant to stop it implementing would punish it for
+     * orchestrating, which is the opposite of the point. Only source edits
+     * count.
+     */
+    const ratio = guard.check({ cwd, cfg });
+    if (!ratio.ok) {
+      deny(
+        `duet: ${ratio.used} inline edits since the last dispatch (limit ${ratio.limit}).\n` +
+        '  You are implementing this phase rather than orchestrating it, and that is the\n' +
+        '  expensive way round: every file you touch stays in YOUR context and is re-read\n' +
+        '  on every turn after it. The same work in a worker is read once and discarded.\n' +
+        '  Dispatch the remaining tickets -- each dispatch clears this allowance.\n' +
+        `  If this really is orchestration work: duet config set limits.editsPerDispatch ${ratio.limit * 2}`,
+      );
+    }
+    guard.recordEdit(cwd);
+  }
+
+
   const allowed = phase.workAllowed(cwd);
   if (!allowed.allowed) {
     deny(

@@ -38,6 +38,18 @@ function main() {
   const notes = [];
 
   /**
+   * SessionStart injection is capped at 10,000 characters. Past the cap Claude
+   * Code writes the text to a file and hands over a path WITHOUT asking Claude
+   * to read it -- so overshooting does not truncate the context, it discards
+   * it, while looking like it worked. Everything pushed into `notes` is
+   * trimmed to fit before it is emitted.
+   */
+  const INJECT_CAP = 10000;
+  const fit = (joined) => (joined.length <= INJECT_CAP
+    ? joined
+    : `${joined.slice(0, INJECT_CAP - 120)}\n\n_duet trimmed this to fit the ${INJECT_CAP}-character limit._`);
+
+  /**
    * The autonomy contract.
    *
    * Stated here because SessionStart fires regardless of which command is
@@ -64,11 +76,34 @@ function main() {
     }
   } catch { /* advisory only */ }
 
+  /**
+   * Rehydrate from the handoff.
+   *
+   * SessionStart fires on /clear (source "clear") as well as on startup and
+   * after compaction, so this is where a deliberate reset gets its context
+   * back. The previous session wrote what it judged worth carrying; this hands
+   * exactly that back and nothing else.
+   */
+  try {
+    const h = require('../lib/handoff.js');
+    const found = h.newest(process.cwd());
+    const text = found ? found.text : null;
+    if (text && text.trim()) {
+      notes.push([
+        'A duet handoff from the previous session is on record. Its contents follow.',
+        'It is what that session judged worth carrying across the context reset;',
+        'the sealed bundle, the plan and CLAUDE.md are still on disk to be read.',
+        '',
+        text.trim(),
+      ].join('\n'));
+    }
+  } catch { /* advisory only */ }
+
   if (cfg.auditMode === 'on-demand') {
     // Still emit the contract even when no checkpoint fires automatically.
     if (notes.length) {
       process.stdout.write(`${JSON.stringify({
-        hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: notes.join('\n') },
+        hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: fit(notes.join('\n')) },
       })}\n`);
     }
     return;
@@ -93,7 +128,7 @@ function main() {
   process.stdout.write(`${JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'SessionStart',
-      additionalContext: notes.join('\n'),
+      additionalContext: fit(notes.join('\n')),
     },
   })}\n`);
 }

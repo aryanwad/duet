@@ -388,3 +388,43 @@ test('a phase ceiling narrows the default but an explicit one wins', () => {
     'config must be able to put it back',
   );
 });
+
+/* ---- the handoff --------------------------------------------------- */
+
+test('a handoff carries the facts duet knows plus what only the agent knows', () => {
+  const cwd = project();
+  phase.start({ cwd });
+  const h = require('../lib/handoff.js');
+  const r = h.write({ next: 'Dispatch all tickets in parallel.', notes: 'venue 3 is flaky', cwd });
+  const text = h.read('orchestrator', cwd);
+
+  assert.match(text, /Dispatch all tickets in parallel/, "the agent's own judgement");
+  assert.match(text, /venue 3 is flaky/);
+  assert.match(text, /phase:/, 'duet fills in what it already knows');
+  assert.ok(r.chars <= h.MAX_CHARS);
+});
+
+test('an over-long handoff is trimmed rather than silently ignored', () => {
+  // Verified constraint: SessionStart injection is capped at 10,000 chars, and
+  // past the cap Claude Code writes the text to a file and does NOT ask Claude
+  // to read it. So an over-long handoff is not truncated, it is dropped — the
+  // worst failure available, because it looks like it worked.
+  const cwd = project();
+  phase.start({ cwd });
+  const h = require('../lib/handoff.js');
+  const r = h.write({ next: 'x'.repeat(40000), cwd });
+
+  assert.strictEqual(r.truncated, true);
+  assert.ok(r.chars <= h.MAX_CHARS, `${r.chars} must fit the injection cap`);
+  assert.match(h.read('orchestrator', cwd), /trimmed to fit/i, 'say that it was trimmed');
+});
+
+test('writing a handoff with nothing to say is refused', () => {
+  const cwd = project();
+  phase.start({ cwd });
+  const h = require('../lib/handoff.js');
+  // The composed facts are free; the --next text is the only part that
+  // carries judgement, so an empty one makes the whole exercise pointless.
+  const text = h.compose({ next: '', cwd });
+  assert.match(text, /recorded nothing here/);
+});

@@ -174,6 +174,14 @@ const DEFAULTS = Object.freeze({
    */
   router: { classPreference: {} },
 
+  /**
+   * How many edits the orchestrator may make with its own hands between
+   * dispatches, while a phase is building. A ratio, not a quota: every
+   * dispatch clears it. See lib/dispatchguard.js for why this is the
+   * expensive axis.
+   */
+  limits: { editsPerDispatch: 25 },
+
   readOnlyAgents: ['duet-scout', 'duet-researcher', 'duet-summarizer', 'duet-prior-art', 'Explore', 'Plan'],
 
   /**

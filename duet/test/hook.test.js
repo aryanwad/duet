@@ -328,3 +328,62 @@ test('the real hook lets a namespaced scout run under a closed gate', () => {
   }, projectDir);
   assert.strictEqual(result.code, 0, 'research is how a blocking plan finding gets resolved');
 });
+
+/* ---- the dispatch ratio ----------------------------------------------- */
+
+test('inline edits are refused once the orchestrator stops delegating', () => {
+  // Measured on a real phase: 1,275 Edits and 672 Writes by the orchestrator
+  // against 28 dispatches, in a session averaging 564k tokens per turn. Work
+  // done inline is re-read on every subsequent turn; work done in a worker is
+  // read once and thrown away with that worker.
+  const { cwd, projectDir } = freshProject();
+  writeState(projectDir, 'phase.json', { active: true, phase: 'building', id: 'c1', history: [] });
+  writeState(projectDir, 'dispatch-guard.json', { cycle: 'c1', edits: 25, dispatches: 1 });
+
+  const result = runHook({ ...EDIT_CALL, cwd }, projectDir);
+  assert.strictEqual(result.code, 2);
+  const reason = JSON.parse(result.stdout).hookSpecificOutput.permissionDecisionReason;
+  assert.match(reason, /inline edits since the last dispatch/);
+  assert.match(reason, /limits\.editsPerDispatch/, 'name the escape hatch');
+});
+
+test('a dispatch clears the allowance — it is a ratio, not a quota', () => {
+  const { cwd, projectDir } = freshProject();
+  writeState(projectDir, 'phase.json', { active: true, phase: 'building', id: 'c1', history: [] });
+  writeState(projectDir, 'dispatch-guard.json', { cycle: 'c1', edits: 40, dispatches: 1 });
+
+  // Dispatching is allowed even over the limit, and resets the counter.
+  const d = runHook({
+    hook_event_name: 'PreToolUse', tool_name: 'Agent',
+    tool_input: { subagent_type: 'duet-worker', prompt: 'next ticket' }, cwd,
+  }, projectDir);
+  assert.strictEqual(d.code, 0, 'delegating must never be blocked by this guard');
+
+  const after = runHook({ ...EDIT_CALL, cwd }, projectDir);
+  assert.strictEqual(after.code, 0, 'the dispatch earned a fresh allowance');
+});
+
+test('the guard does not fire outside building', () => {
+  // Before building there is nothing to dispatch; after it the orchestrator is
+  // verifying and committing, which is its own work.
+  for (const p of ['audited', 'built', 'verified']) {
+    const { cwd, projectDir } = freshProject();
+    writeState(projectDir, 'phase.json', { active: true, phase: p, id: 'c1', history: [] });
+    writeState(projectDir, 'dispatch-guard.json', { cycle: 'c1', edits: 99, dispatches: 0 });
+    assert.strictEqual(runHook({ ...EDIT_CALL, cwd }, projectDir).code, 0, `phase ${p}`);
+  }
+});
+
+test('fixing a blocking code review is never counted against the ratio', () => {
+  // That exemption exists because the gate demands the fix; the guard must not
+  // then refuse it. The gate branch exits before the guard, so this is a
+  // regression test on ORDER.
+  const { cwd, projectDir } = freshProject();
+  writeState(projectDir, 'phase.json', { active: true, phase: 'building', id: 'c1', history: [] });
+  writeState(projectDir, 'dispatch-guard.json', { cycle: 'c1', edits: 99, dispatches: 0 });
+  writeState(projectDir, 'gate.json', {
+    blocked: true, bundleId: 'b1', checkpoint: 'feature', task: 't1', summary: 'pump never spins', findings: [],
+  });
+
+  assert.strictEqual(runHook({ ...EDIT_CALL, cwd }, projectDir).code, 0);
+});

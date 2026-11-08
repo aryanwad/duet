@@ -127,4 +127,52 @@ function buildPrompt({ ticket, bundleView = '', extra = '' } = {}) {
   return lines.join('\n');
 }
 
-module.exports = { CONTRACT, OUTPUT_SCHEMA, schemaPath, buildPrompt };
+/**
+ * The part of a worker's report the orchestrator needs to carry.
+ *
+ * A worker's full reply is prose plus JSON, and all of it used to land in the
+ * orchestrator's context, where it is then re-read on every subsequent turn
+ * until compaction. Across a phase of thirty tickets that is the single
+ * largest avoidable admission.
+ *
+ * The schema exists precisely so this does not have to be a judgement call:
+ * status, the files touched, and the worker's own uncertainties are what the
+ * orchestrator acts on and what the pre-merge audit is fed. The reasoning that
+ * produced them was already paid for once, in the worker's own context.
+ */
+function digest(report) {
+  let r = report;
+  if (typeof r === 'string') {
+    // Tolerate a raw reply with the JSON block at the end.
+    const m = r.match(/\{[\s\S]*\}\s*$/);
+    try { r = JSON.parse(m ? m[0] : r); } catch { return null; }
+  }
+  if (!r || typeof r !== 'object') return null;
+
+  const files = (r.changed || []).map((c) => (c && c.file) || '?').filter(Boolean);
+  const verified = (r.verified || []).map((v) => (v && v.command) || '?').filter(Boolean);
+  return {
+    status: r.status || 'unknown',
+    blockedBy: r.blockedBy || null,
+    files,
+    verified,
+    unsure: Array.isArray(r.unsure) ? r.unsure : [],
+  };
+}
+
+/** The digest as the few lines the orchestrator should keep. */
+function renderDigest(d, { ticket = '' } = {}) {
+  if (!d) return `${ticket || 'worker'}: UNPARSEABLE report — read the output file directly.`;
+  const lines = [`${ticket || 'worker'}: ${d.status}${d.blockedBy ? ` — ${d.blockedBy}` : ''}`];
+  if (d.files.length) lines.push(`  files: ${d.files.join(', ')}`);
+  lines.push(`  verified: ${d.verified.length ? d.verified.join('; ') : 'NOTHING RUN'}`);
+  if (d.unsure.length) {
+    lines.push('  unsure:');
+    for (const u of d.unsure) lines.push(`    - ${u}`);
+  } else {
+    lines.push('  unsure: none claimed');
+  }
+  return lines.join('\n');
+}
+
+module.exports = { CONTRACT, OUTPUT_SCHEMA, schemaPath, buildPrompt, digest, renderDigest };
