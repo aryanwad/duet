@@ -180,9 +180,34 @@ const DEFAULTS = Object.freeze({
    * dispatch clears it. See lib/dispatchguard.js for why this is the
    * expensive axis.
    */
-  limits: { editsPerDispatch: 25 },
+  limits: {
+    editsPerDispatch: 25,
+    /**
+     * Longest prompt a worker dispatch may carry before duet assumes the whole
+     * bundle was pasted in. `duet worker brief` produces a ticket-scoped view
+     * of a few hundred tokens; a multi-thousand-character prompt is the full
+     * bundle, which is both waste and 31 tickets the worker was told not to
+     * touch.
+     */
+    dispatchPromptChars: 6000,
+  },
 
-  readOnlyAgents: ['duet-scout', 'duet-researcher', 'duet-summarizer', 'duet-prior-art', 'Explore', 'Plan'],
+  /**
+   * Boundaries where the context is worth resetting deliberately. Entering
+   * the build phase without a handoff on record is refused, because an
+   * unattended run's only other reset is compaction, which loses whatever it
+   * decides to.
+   */
+  handoff: { requireAtBoundaries: true },
+
+  /**
+   * One cheap adversarial pass before the first expensive one. A real design
+   * cycle spent thirteen auditor calls discovering failure modes one per
+   * round; this looks for them all at once, on a cheap model, first.
+   */
+  adversary: { requireBeforeFirstAudit: true, max: 10 },
+
+  readOnlyAgents: ['duet-scout', 'duet-researcher', 'duet-summarizer', 'duet-prior-art', 'duet-adversary', 'Explore', 'Plan'],
 
   /**
    * Commit discipline. A commit is a claim about history, so duet refuses one

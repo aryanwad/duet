@@ -121,12 +121,25 @@ function isPlanOnlyCommand(command, patterns = []) {
   // One command at a time; chaining could smuggle anything after the &&.
   if (/[;&|><`$(]/.test(text)) return false;
 
-  // A quoted token stays whole: a home directory with a space in it
-  // ("C:\Users\Jane Doe\...") must not split into two non-plan tokens.
-  const tokens = (text.match(/"[^"]*"|'[^']*'|\S+/g) || [])
-    .slice(1)
-    .filter((tok) => tok && !tok.startsWith('-'))
-    .map((tok) => tok.replace(/^["']|["']$/g, ''));
+  /**
+   * Quote-aware, because a Windows home directory usually has a space in it.
+   *
+   * Splitting on whitespace turned `"C:\\Users\\Jane Doe\\...\\draft.md"` into
+   * `"C:\\Users\\Jane` and `Doe\\...\\draft.md"`, neither of which looks like a
+   * plan, so moving a plan on any machine whose user has a two-word name was
+   * refused. An unbalanced quote falls through to the bare-token branch and
+   * fails the plan test, which is the safe direction.
+   */
+  const tokens = [];
+  const lexer = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let match = lexer.exec(text);
+  let first = true;
+  while (match) {
+    const tok = match[1] !== undefined ? match[1] : (match[2] !== undefined ? match[2] : match[3]);
+    if (first) first = false;                      // the command word itself
+    else if (tok && !tok.startsWith('-')) tokens.push(tok);
+    match = lexer.exec(text);
+  }
 
   if (!tokens.length) return false;
 
@@ -183,5 +196,26 @@ function classify(toolName, toolInput = {}, { readOnlyAgents = [] } = {}) {
   return { mutating: false, reason: `${toolName} does not change the working tree` };
 }
 
+/**
+ * Was this tool call made by a subagent rather than the orchestrator?
+ *
+ * PreToolUse fires for a worker's tool calls as well as the orchestrator's,
+ * and carries the SAME session_id, transcript_path and cwd for both -- so
+ * anything that counts an agent's own actions must separate them itself or it
+ * will charge a worker's work to the orchestrator.
+ *
+ * Verified against Claude Code 2.1.321 by logging real payloads: a tool call
+ * from inside a subagent carries `agent_type` (the subagent's name) and
+ * `agent_id`; a call from the main loop carries neither. Both fields are
+ * absent on the dispatching `Agent` call itself, which the orchestrator makes.
+ * Neither field is in the documented base payload, so this is deliberately
+ * tolerant: either one present means subagent.
+ */
+function fromSubagent(payload) {
+  if (!payload || typeof payload !== 'object') return false;
+  return Boolean(payload.agent_type || payload.agent_id);
+}
+
 module.exports = {
+  fromSubagent,
   DISPATCH_TOOLS, bareAgent, MUTATING_TOOLS, BASH_MUTATION, ALWAYS_ALLOWED_BASH, classifyBash, classify, isPlanFile, isPlanOnlyCommand };

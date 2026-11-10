@@ -363,6 +363,45 @@ test('a dispatch clears the allowance — it is a ratio, not a quota', () => {
   assert.strictEqual(after.code, 0, 'the dispatch earned a fresh allowance');
 });
 
+test('a worker is never charged the orchestrator\'s allowance', () => {
+  // Reported from a live build: a worker hit the 25-edit limit mid-ticket and
+  // split its work into smaller hand-offs to get around it. The guard exists
+  // to push work INTO workers, so refusing a worker for doing that work is the
+  // guard firing at its own success. Worse, it was unescapable: a worker has no
+  // Task tool, so nothing it could do would clear the counter.
+  const { cwd, projectDir } = freshProject();
+  writeState(projectDir, 'phase.json', { active: true, phase: 'building', id: 'c1', history: [] });
+  writeState(projectDir, 'dispatch-guard.json', { cycle: 'c1', edits: 99, dispatches: 0 });
+
+  // Field names verified against Claude Code 2.1.321 by logging real payloads.
+  const asWorker = { ...EDIT_CALL, cwd, agent_type: 'duet-worker', agent_id: 'a685f015f8c48df49' };
+  assert.strictEqual(runHook(asWorker, projectDir).code, 0, 'a worker edits freely');
+
+  // ...and its edits do not accumulate against the orchestrator either.
+  runHook(asWorker, projectDir);
+  runHook(asWorker, projectDir);
+  const state = JSON.parse(fs.readFileSync(path.join(projectDir, 'dispatch-guard.json'), 'utf8'));
+  assert.strictEqual(state.edits, 99, 'the counter is untouched by worker edits');
+
+  // The orchestrator, on the same state, is still refused.
+  assert.strictEqual(runHook({ ...EDIT_CALL, cwd }, projectDir).code, 2, 'the guard still works');
+});
+
+test('a worker dispatching does not clear the orchestrator\'s allowance', () => {
+  const { cwd, projectDir } = freshProject();
+  writeState(projectDir, 'phase.json', { active: true, phase: 'building', id: 'c1', history: [] });
+  writeState(projectDir, 'dispatch-guard.json', { cycle: 'c1', edits: 40, dispatches: 1 });
+
+  runHook({
+    hook_event_name: 'PreToolUse', tool_name: 'Agent',
+    tool_input: { subagent_type: 'general-purpose', prompt: 'look something up' },
+    cwd, agent_type: 'duet-worker', agent_id: 'a1',
+  }, projectDir);
+
+  assert.strictEqual(runHook({ ...EDIT_CALL, cwd }, projectDir).code, 2,
+    'the orchestrator cannot earn an allowance through a worker');
+});
+
 test('the guard does not fire outside building', () => {
   // Before building there is nothing to dispatch; after it the orchestrator is
   // verifying and committing, which is its own work.
@@ -386,4 +425,43 @@ test('fixing a blocking code review is never counted against the ratio', () => {
   });
 
   assert.strictEqual(runHook({ ...EDIT_CALL, cwd }, projectDir).code, 0);
+});
+
+/* ---- the ticket view has to reach Claude workers too ------------------ */
+
+test('an oversized dispatch prompt is refused', () => {
+  // `duet worker brief` was wired into the Codex path only, so anthropic
+  // tickets went out as Agent dispatches carrying the whole bundle. Measured
+  // over a 13,314-turn session, worker brief was called zero times — the
+  // 3,267-to-558 saving never applied to most workers.
+  const { cwd, projectDir } = freshProject();
+  writeState(projectDir, 'phase.json', { active: true, phase: 'building', id: 'c1', history: [] });
+
+  const result = runHook({
+    hook_event_name: 'PreToolUse', tool_name: 'Agent',
+    tool_input: { subagent_type: 'duet-worker', prompt: 'x'.repeat(7000) }, cwd,
+  }, projectDir);
+
+  assert.strictEqual(result.code, 2);
+  const reason = JSON.parse(result.stdout).hookSpecificOutput.permissionDecisionReason;
+  assert.match(reason, /duet worker brief/, 'name the thing that produces a right-sized brief');
+});
+
+test('a ticket-view sized dispatch passes', () => {
+  const { cwd, projectDir } = freshProject();
+  writeState(projectDir, 'phase.json', { active: true, phase: 'building', id: 'c1', history: [] });
+  assert.strictEqual(runHook({
+    hook_event_name: 'PreToolUse', tool_name: 'Agent',
+    tool_input: { subagent_type: 'duet-worker', prompt: 'Ticket 3 of 12: wire the limiter.' }, cwd,
+  }, projectDir).code, 0);
+});
+
+test('a read-only research agent is never size-checked', () => {
+  // Research prompts are legitimately long and the agent changes nothing.
+  const { cwd, projectDir } = freshProject();
+  writeState(projectDir, 'phase.json', { active: true, phase: 'building', id: 'c1', history: [] });
+  assert.strictEqual(runHook({
+    hook_event_name: 'PreToolUse', tool_name: 'Agent',
+    tool_input: { subagent_type: 'duet:duet-scout', prompt: 'y'.repeat(9000) }, cwd,
+  }, projectDir).code, 0);
 });

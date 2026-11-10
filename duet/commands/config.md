@@ -25,6 +25,8 @@ reading the JSON out. The ones worth checking:
 |---|---|---|
 | `audit.maxRounds` | `2` | fix-and-re-audit rounds at plan, and per task at feature |
 | `audit.maxRoundsByCheckpoint.premerge` | `3` | the final review gets one extra round |
+| `adversary.requireBeforeFirstAudit` | `true` | one cheap pass before the first expensive one |
+| `adversary.max` | `10` | scenarios it may return; more buries the real ones |
 | `audit.onCap` | `proceed` | at the cap, open the gate and record the findings |
 | `audit.stopOnRepeat` | `true` | identical findings twice ends the loop early |
 | `audit.autoContinue` | `true` | the Stop hook holds the turn open mid-phase |
