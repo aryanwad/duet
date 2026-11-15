@@ -695,16 +695,26 @@ test('the first audit waits for the cheap pass', async () => {
   } finally { stub.restore(); }
 });
 
-test('a broken auditor is reported before the adversarial pass is demanded', () => {
+test('a broken auditor is reported before the adversarial pass is demanded', async () => {
   // Ordering matters: if codex cannot run at all, sending someone to do a
   // cheap pass first ends in the same failure having wasted the pass. Same
   // shape as a gate demanding a fix it forbids.
+  //
+  // The env var is the whole point. This first passed only because codex was
+  // absent from the machine it ran on -- on a machine with codex installed the
+  // real preflight succeeded, the adversary gate fired as designed, and the
+  // test asserted the wrong thing. A machine state the test does not set is
+  // not a fixture, and `audit.test.js` already had the right technique.
   const cwd = project();
   const b = sealFeature(cwd);
-  return audit.run({ checkpoint: 'plan', bundleId: b.id, cwd, cfg: GUARDED }).then((r) => {
+  process.env.DUET_CODEX_BIN = '/nonexistent/codex-binary';
+  try {
+    const r = await audit.run({ checkpoint: 'plan', bundleId: b.id, cwd, cfg: GUARDED });
     assert.strictEqual(r.skipped, true);
     assert.match(r.reason, /codex CLI not found/, 'report the real blocker, not the cheap one');
-  });
+  } finally {
+    delete process.env.DUET_CODEX_BIN;
+  }
 });
 
 test('recording the pass releases the first audit', async () => {
