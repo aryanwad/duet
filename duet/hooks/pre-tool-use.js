@@ -200,9 +200,66 @@ async function main() {
    * test pins that ordering.
    */
   const guard = require('../lib/dispatchguard.js');
+
+  /**
+   * The ratio is the ORCHESTRATOR's, so only its own hands count.
+   *
+   * This hook fires for a worker's edits too, with the same cwd and the same
+   * state file, so a worker was spending the orchestrator's allowance and
+   * getting refused mid-build on a limit it had no way to clear -- a worker
+   * cannot dispatch, so nothing it could do would reset the counter. It was
+   * being punished for doing exactly what the guard exists to cause.
+   *
+   * A worker's dispatch is excluded from the credit side for the same reason:
+   * it would clear an allowance that is not its to clear.
+   */
+  const bySubagent = mutating.fromSubagent(payload);
+
+  /**
+   * On a fix, doing it yourself IS the cheap option.
+   *
+   * The ratio exists because a big edit lives in the orchestrator's context and
+   * is re-read every turn after. A worker avoids that but pays its own system
+   * prompt and CLAUDE.md tree -- ~53,000 tokens on a real setup -- so below a
+   * few hundred tokens of edit the guard was pushing the orchestrator onto the
+   * more expensive path and spawning an agent for three lines of code.
+   */
+  const isFix = (() => {
+    try {
+      const bundles = require('../lib/bundle.js');
+      return bundles.scaleOf(bundles.load(null, cwd), cfg) === 'small';
+    } catch { return false; }
+  })();
+
   if (/^dispatches /.test(verdict.reason)) {
-    guard.recordDispatch(cwd);
-  } else if (['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(toolName)
+    /**
+     * The ticket view only ever reached Codex workers.
+     *
+     * `duet worker brief` was wired into the Codex path alone, so anthropic
+     * tickets went out as Agent dispatches carrying whatever prompt the
+     * orchestrator wrote -- in practice the whole bundle. Measured across a
+     * 13,314-turn session, `worker brief` was called zero times, so the
+     * 3,267-to-558 token saving never applied to most workers.
+     *
+     * Checking the prompt's SIZE rather than its content keeps this honest:
+     * duet does not dictate what a brief says, only that a few hundred tokens
+     * of ticket is not the same thing as a few thousand of everything.
+     */
+    const promptLen = String(toolInput.prompt || toolInput.description || '').length;
+    const maxPrompt = cfg?.limits?.dispatchPromptChars || config.DEFAULTS.limits.dispatchPromptChars;
+    if (promptLen > maxPrompt) {
+      deny(
+        `duet: that dispatch prompt is ${promptLen} characters (limit ${maxPrompt}).\n` +
+        '  A worker executes ONE ticket and is told not to touch the others, so a prompt\n' +
+        '  this size is the whole bundle — waste, and an invitation to do the rest of it.\n' +
+        '  Build the brief instead, for Claude workers as well as Codex ones:\n' +
+        '    duet worker brief --ticket \'{"title":"...","class":"..."}\'\n' +
+        '  and pass that as the prompt.',
+      );
+    }
+    if (!bySubagent) guard.recordDispatch(cwd);
+  } else if (!bySubagent && !isFix
+             && ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(toolName)
              && !/\.(md|markdown)$/i.test(String(target || ''))) {
     /**
      * Markdown is exempt. Writing the plan, revising CLAUDE.md, recording a

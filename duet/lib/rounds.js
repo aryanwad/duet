@@ -99,12 +99,22 @@ function checkpointOf(scope) {
   return i === -1 ? scope : String(scope).slice(0, i);
 }
 
-/** The configured cap for a scope. */
-function maxFor(scope, cfg) {
+/**
+ * The configured cap for a scope, optionally tightened by the cycle's scale.
+ *
+ * Scale only ever tightens. A small change getting MORE rounds than the
+ * checkpoint allows would invert the point, so the two caps combine by minimum
+ * and callers that know nothing about scale keep their existing behaviour.
+ */
+function maxFor(scope, cfg, scale = null) {
   const audit = cfg?.audit || {};
   const override = audit.maxRoundsByCheckpoint || {};
   const value = override[checkpointOf(scope)] ?? audit.maxRounds;
-  return Number.isFinite(value) && value > 0 ? value : 3;
+  let max = Number.isFinite(value) && value > 0 ? value : 3;
+
+  const byScale = (audit.maxRoundsByScale || {})[scale];
+  if (Number.isFinite(byScale) && byScale > 0) max = Math.min(max, byScale);
+  return max;
 }
 
 /**
@@ -113,9 +123,9 @@ function maxFor(scope, cfg) {
  * Returns a reason precise enough to act on without guessing, because the
  * caller acting on it is usually a model, not a person.
  */
-function check(checkpoint, { bundleKey = null, cwd = process.cwd(), cfg } = {}) {
+function check(checkpoint, { bundleKey = null, cwd = process.cwd(), cfg, scale = null } = {}) {
   const used = entry(checkpoint, cwd);
-  const max = maxFor(checkpoint, cfg);
+  const max = maxFor(checkpoint, cfg, scale);
 
   if (used.used >= max) {
     return {

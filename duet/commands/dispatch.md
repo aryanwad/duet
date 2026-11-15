@@ -35,8 +35,18 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" route --tickets '[{"title":"..."},{"tit
 
 6. Execute each assignment:
 
-   - **anthropic** — dispatch with the `Task` tool to the `duet-worker`
-     subagent. Pass the ticket plus the relevant slice of the bundle.
+   - **anthropic** — build the brief the same way, then dispatch it to the
+     `duet-worker` subagent:
+
+     ```bash
+     node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" worker brief \
+       --ticket '{"title":"...","class":"..."}'
+     ```
+
+     Pass that output as the dispatch prompt. Both families get the same
+     contract and the same ticket-scoped view this way. Do not paste the whole
+     bundle: a worker runs ONE ticket, and duet refuses a dispatch prompt over
+     `limits.dispatchPromptChars` because a prompt that size is the bundle.
 
    - **openai** — build the brief rather than writing one. Both families get
      the same contract this way, and the report comes back in the same shape:

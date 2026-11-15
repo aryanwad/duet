@@ -41,7 +41,16 @@ How to work:
   ticket impossible, say which one.
 
 - Run the tests that cover what you touched. If there are none, say so rather
-  than implying the change is verified.`;
+  than implying the change is verified.
+
+- Before you report done, try to break what you wrote. Walk the boundaries of
+  what you changed: empty, zero, one, maximum; the operation arriving twice,
+  out of order, or interleaved; the call that fails halfway and leaves state
+  behind; the unstated opposite of each assumption you made. Handle what
+  belongs to this ticket, and list anything you chose not to handle in `unsure`
+  with the reason. You are the author, so this sweep does not replace the
+  reviewer who did not write it -- it means that reviewer's first look lands on
+  code that already handles the ordinary cases.`;
 
 /**
  * The four fields the Sonnet contract asks for, as a schema Codex can be held
@@ -88,7 +97,7 @@ const OUTPUT_SCHEMA = Object.freeze({
     },
     unsure: {
       type: 'array',
-      description: 'Anything guessed at, assumed, or worth a second opinion. The cross-family reviewer reads this first. An empty array is a claim that nothing was assumed -- make it only if true.',
+      description: 'Anything guessed at or assumed, plus every edge case you found and chose not to handle, with the reason. The cross-family reviewer reads this first. An empty array is a claim that nothing was assumed and nothing was left -- make it only if true.',
       items: { type: 'string' },
     },
   },

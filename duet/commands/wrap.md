@@ -50,6 +50,30 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" bundle create \
 Keep the plan JSON you passed. You will be revising and re-passing it in the
 loop below, and reconstructing it from memory each round is how a fix gets lost.
 
+## 3b. Break it yourself first — one cheap pass
+
+Before the first auditor call, dispatch `duet-adversary` to look for what the
+plan has not accounted for. This is the cheapest round you will run, and it
+exists because the alternative is measured: a real design cycle spent thirteen
+auditor calls and an hour discovering failure modes one per round.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" adversary brief plan
+```
+
+Dispatch that to the `duet-adversary` subagent, then record what comes back:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" adversary record --file <its json> plan
+```
+
+Then **answer each item in the plan** before auditing. An item you disagree
+with is worth rejecting explicitly in the text — Astra will raise it otherwise,
+and a stated reason ends the argument in one round instead of two.
+
+duet refuses the first audit at a checkpoint until this is on record. It never
+delays later rounds: those are answering real findings.
+
 ## 4. The plan audit loop — run it to convergence yourself
 
 ```bash
@@ -156,11 +180,16 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" worker report \
   --file /tmp/duet-t.txt --ticket "<ticket title>"
 ```
 
-**Dispatch the tickets rather than doing them yourself.** A file you read or
-edit stays in your context and is re-read on every turn that follows; the same
-work in a worker is read once and discarded with it. duet enforces a ratio
-here — past `limits.editsPerDispatch` inline edits since your last dispatch,
-the hook refuses, and each dispatch clears the allowance.
+**Dispatch work that is bigger than a worker's own overhead; do the rest
+yourself.** A file you read or edit stays in your context and is re-read on
+every turn that follows, which is why a real phase belongs in workers. But a
+worker is not free: it pays its own system prompt and this project's CLAUDE.md
+tree, which can run to tens of thousands of tokens before it reads a line. So
+the test is whether `size of the edit × turns left in this phase` beats that
+overhead. A multi-file ticket clears it easily. A three-line fix does not —
+spawning an agent for it costs several times more than making the edit. duet
+enforces the ratio only on a feature-shaped cycle; on a fix (no plan document,
+one ticket or none) the guard stands down and inline editing is the cheap path.
 
 **Dispatch independent tickets in parallel, in one message.** Several worker
 calls issued together run concurrently; one per message runs them in series and
@@ -190,9 +219,17 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" phase set built
 node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" bundle reseal \
   --tickets '[...]' --note "as built"
 
+node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" adversary brief premerge
+# dispatch to duet-adversary, then:
+node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" adversary record --file <its json> premerge
+
 node "${CLAUDE_PLUGIN_ROOT}/bin/duet.js" audit premerge \
   --extra "<the workers' stated uncertainties, plus your own>"
 ```
+
+The adversarial pass runs here too, and hunts different things in a diff than
+in a plan: values the types permit but the logic assumes away, a path that
+returns early past a cleanup, an error swallowed where the caller cannot tell.
 
 Re-seal first so the bundle reflects what was built rather than what was
 planned.

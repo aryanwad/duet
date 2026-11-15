@@ -123,6 +123,25 @@ function write({ next = '', notes = '', agent = 'orchestrator', cwd = process.cw
   return { file, chars: text.length, truncated, cap: MAX_CHARS };
 }
 
+/**
+ * Has a handoff been written for the cycle that is running now?
+ *
+ * Measured over a 13,314-turn session: `duet handoff write` was called zero
+ * times. The boundaries were documented in wrap.md and documentation does not
+ * make things happen -- the same lesson the gate, the Stop hook and the
+ * dispatch ratio each taught separately. So the boundary is checked, not
+ * suggested, and the composed text carries the cycle id to check against.
+ */
+function writtenForCycle(cwd = process.cwd()) {
+  const id = phase.status(cwd).id;
+  if (!id) return true; // nothing to tie it to; do not stand in the way
+  for (const agent of list(cwd)) {
+    const t = read(agent, cwd);
+    if (t && t.includes(id)) return true;
+  }
+  return false;
+}
+
 function read(agent = 'orchestrator', cwd = process.cwd()) {
   try { return fs.readFileSync(handoffPath(agent, cwd), 'utf8'); } catch { return null; }
 }
@@ -152,4 +171,4 @@ function list(cwd = process.cwd()) {
   } catch { return []; }
 }
 
-module.exports = { MAX_CHARS, handoffDir, handoffPath, facts, compose, write, read, list, newest };
+module.exports = { MAX_CHARS, handoffDir, handoffPath, facts, compose, write, read, list, newest, writtenForCycle };

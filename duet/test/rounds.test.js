@@ -83,6 +83,9 @@ const CFG = config.deepMerge(config.DEFAULTS, {
   auditMode: 'on-demand',
   quota: { budgets: {} },
   audit: { maxRounds: 3, onCap: 'proceed' },
+  // These tests are about the round machinery, not about the adversarial pass
+  // that now precedes a first audit. Its own tests are below.
+  adversary: { requireBeforeFirstAudit: false },
 });
 
 /**
@@ -653,4 +656,170 @@ test('the gate records which task blocked it', async () => {
   } finally {
     stub.restore();
   }
+});
+
+/* ---- the adversarial pass before the first audit ---------------------- */
+
+const adversary = require('../lib/adversary.js');
+const GUARDED = config.deepMerge(CFG, { adversary: { requireBeforeFirstAudit: true, max: 10 } });
+
+/**
+ * A feature, not a fix: the adversarial pass is bought by scale now, so these
+ * bundles need a plan document and more than one ticket to reach the gate.
+ */
+function sealFeature(cwd, extra = {}) {
+  const bundle = bundles.create({
+    brief: 'ship the limiter',
+    plan: { summary: 'draft 1', steps: ['add the limiter', 'wire the cap'] },
+    tickets: [{ title: 'limiter' }, { title: 'cap' }],
+    cwd,
+    ...extra,
+  });
+  bundles.save(bundle, cwd);
+  if (phase.status(cwd).phase === 'planned') phase.set('sealed', { cwd });
+  return bundle;
+}
+
+test('the first audit waits for the cheap pass', async () => {
+  // A real cycle spent 13 auditor calls and an hour discovering failure modes
+  // one per round. One cheap model looking for all of them first is the trade.
+  const cwd = project();
+  const b = sealFeature(cwd);
+  const stub = stubAuditor('pass');
+  try {
+    const r = await audit.run({ checkpoint: 'plan', bundleId: b.id, cwd, cfg: GUARDED });
+    assert.strictEqual(r.skipped, true);
+    assert.strictEqual(r.needsAdversary, true);
+    assert.match(r.reason, /duet adversary brief/);
+    assert.strictEqual(stub.count, 0, 'the expensive call must not happen');
+  } finally { stub.restore(); }
+});
+
+test('a broken auditor is reported before the adversarial pass is demanded', () => {
+  // Ordering matters: if codex cannot run at all, sending someone to do a
+  // cheap pass first ends in the same failure having wasted the pass. Same
+  // shape as a gate demanding a fix it forbids.
+  const cwd = project();
+  const b = sealFeature(cwd);
+  return audit.run({ checkpoint: 'plan', bundleId: b.id, cwd, cfg: GUARDED }).then((r) => {
+    assert.strictEqual(r.skipped, true);
+    assert.match(r.reason, /codex CLI not found/, 'report the real blocker, not the cheap one');
+  });
+});
+
+test('recording the pass releases the first audit', async () => {
+  const cwd = project();
+  const b = sealFeature(cwd);
+  adversary.record({
+    bundleId: b.id,
+    checkpoint: 'plan',
+    items: [{ scenario: 'quantity is zero', breaks: 'the helper rejects it', mustSay: 'define q=0', severity: 'high' }],
+    cwd,
+  });
+  const stub = stubAuditor('pass');
+  try {
+    const r = await audit.run({ checkpoint: 'plan', bundleId: b.id, cwd, cfg: GUARDED });
+    assert.notStrictEqual(r.needsAdversary, true, 'the pass is on record; the audit may proceed');
+    assert.strictEqual(stub.count, 1);
+  } finally { stub.restore(); }
+});
+
+test('later rounds are not delayed by it', async () => {
+  // Rounds 2+ are answering real findings. Making them wait would be the
+  // opposite of the point.
+  const cwd = project();
+  const b = sealFeature(cwd);
+  rounds.record(rounds.scopeFor('plan'), { bundleKey: 'k1', findings: [], cwd });
+  const stub = stubAuditor('pass');
+  try {
+    const r = await audit.run({ checkpoint: 'plan', bundleId: b.id, cwd, cfg: GUARDED });
+    assert.notStrictEqual(r.needsAdversary, true);
+  } finally { stub.restore(); }
+});
+
+test('answering the findings does not revoke the pass', async () => {
+  // The bug this pins: the record was first keyed to the bundle's content
+  // hash. But the instructions are to run the pass, ANSWER the items in the
+  // draft, re-seal, then audit -- and answering them changes the plan, which
+  // changes the hash. The record stopped matching, and because the first audit
+  // had never run the round counter was still zero, so the gate fired again.
+  // Following the instructions correctly locked the audit out forever.
+  const cwd = project();
+  phase.start({ cwd });
+  const b = sealFeature(cwd);
+  adversary.record({ checkpoint: 'plan', bundleId: b.id, items: [], cwd });
+  assert.strictEqual(adversary.doneFor('plan', cwd), true);
+
+  bundles.reseal({
+    plan: { summary: 'draft 2', steps: ['add the limiter', 'define the q=0 case'] },
+    note: 'answers the adversarial findings',
+    cwd,
+  });
+  assert.strictEqual(adversary.doneFor('plan', cwd), true, 'the pass belongs to the cycle, not the draft');
+
+  const stub = stubAuditor('pass');
+  try {
+    const r = await audit.run({ checkpoint: 'plan', bundleId: bundles.load(null, cwd).id, cwd, cfg: GUARDED });
+    assert.notStrictEqual(r.needsAdversary, true, 'the audit must not be refused a second time');
+  } finally { stub.restore(); }
+});
+
+test('each checkpoint gets its own pass, and a new cycle starts clean', () => {
+  const cwd = project();
+  phase.start({ cwd });
+  const b = sealFeature(cwd);
+  adversary.record({ checkpoint: 'plan', bundleId: b.id, items: [], cwd });
+
+  assert.strictEqual(adversary.doneFor('plan', cwd), true);
+  assert.strictEqual(adversary.doneFor('premerge', cwd), false, 'a diff needs its own pass');
+
+  phase.stop(cwd);
+  phase.start({ cwd });
+  assert.strictEqual(adversary.doneFor('plan', cwd), false, 'next cycle, new plan, new pass');
+});
+
+test('a fix is not made to buy an adversarial pass', async () => {
+  // The whole complaint: a two-line change was getting a design's apparatus --
+  // an adversary session, a plan audit, a worker dispatch and a pre-merge
+  // review. No plan document and one ticket means fix, and the cross-family
+  // reviewer is the check that survives.
+  const cwd = project();
+  phase.start({ cwd });
+  const b = seal(cwd, null);
+  const stub = stubAuditor('pass');
+  try {
+    const r = await audit.run({ checkpoint: 'premerge', bundleId: b.id, cwd, cfg: GUARDED });
+    assert.notStrictEqual(r.needsAdversary, true, 'a fix goes straight to the cross-family review');
+    assert.strictEqual(stub.count, 1, 'and the review still happens');
+  } finally { stub.restore(); }
+});
+
+test('a fix gets one round, not a negotiation', () => {
+  const cwd = project();
+  phase.start({ cwd });
+  const fix = seal(cwd, null);
+  const feature = bundles.create({
+    brief: 'x', plan: { steps: ['a', 'b'] }, tickets: [{ title: 'one' }, { title: 'two' }], cwd,
+  });
+  assert.strictEqual(bundles.scaleOf(fix, GUARDED), 'small');
+  assert.strictEqual(bundles.scaleOf(feature, GUARDED), 'large');
+  assert.strictEqual(rounds.maxFor('premerge', GUARDED, 'small'), 1);
+  // Scale only ever tightens: premerge's own cap still applies to a feature.
+  assert.strictEqual(rounds.maxFor('premerge', GUARDED, 'large'),
+    GUARDED.audit.maxRoundsByCheckpoint.premerge);
+});
+
+test('the brief asks for a bounded ranked list, not everything imaginable', () => {
+  // An unbounded list costs context, buries the real items, and hands the
+  // auditor more to block on.
+  const cwd = project();
+  const b = sealFeature(cwd);
+  const text = adversary.buildPrompt({ bundle: b, checkpoint: 'plan', max: 10 });
+
+  assert.match(text, /at most 10 items, ranked/);
+  assert.match(text, /leave it out rather than padding/);
+  assert.match(text, /interleavings/, 'a plan needs ordering scenarios');
+
+  const code = adversary.buildPrompt({ bundle: b, checkpoint: 'premerge', max: 10 });
+  assert.match(code, /returns early/, 'a diff needs different imagination than a plan');
 });

@@ -57,6 +57,65 @@ function readJsonFlag(flag, fallback) {
 
 const COMMANDS = {
   /**
+   * The cheap adversarial pass that runs before the first auditor call.
+   *
+   * `brief` prints the prompt to dispatch to duet-adversary; `record` stores
+   * what came back, keyed to the bundle's substance so a re-seal of unchanged
+   * content does not pay for it twice.
+   */
+  async adversary({ positional, flags }) {
+    const adversary = require('../lib/adversary.js');
+    const sub = positional[1] || 'show';
+    const json = Boolean(flags.json);
+    const cfg = config.load();
+
+    const bundle = bundles.load(flags.bundle && flags.bundle !== true ? flags.bundle : null);
+    if (!bundle) throw new Error('no current bundle: seal one with `duet bundle create` first');
+
+    if (sub === 'schema') return out(JSON.stringify(adversary.OUTPUT_SCHEMA, null, 2), false);
+
+    if (sub === 'brief') {
+      const checkpoint = positional[2] || 'plan';
+      return out(adversary.buildPrompt({
+        bundle,
+        checkpoint,
+        max: cfg.adversary?.max || adversary.DEFAULT_MAX,
+      }), false);
+    }
+
+    if (sub === 'record') {
+      const raw = flags.file && flags.file !== true
+        ? require('node:fs').readFileSync(flags.file, 'utf8')
+        : readMaybeFile(flags.items);
+      if (!raw) throw new Error('adversary record needs --file <json> or --items \'{"items":[...]}\'');
+      let parsed;
+      try {
+        const m = String(raw).match(/\{[\s\S]*\}\s*$/);
+        parsed = JSON.parse(m ? m[0] : raw);
+      } catch { throw new Error('could not parse the adversary output as JSON'); }
+      const items = Array.isArray(parsed) ? parsed : (parsed.items || []);
+      const rec = adversary.record({ checkpoint: positional[2] || 'plan', bundleId: bundle.id, items });
+      if (json) return out(rec, true);
+      const lines = [`recorded ${rec.count} scenario(s) against bundle ${bundle.id}`, ''];
+      for (const it of items.slice(0, 20)) {
+        lines.push(`  [${it.severity || '?'}] ${it.scenario}`);
+        if (it.breaks) lines.push(`      breaks: ${it.breaks}`);
+        if (it.mustSay) lines.push(`      must say: ${it.mustSay}`);
+      }
+      lines.push('', 'Answer these in the draft, then run the audit. Items you reject are worth');
+      lines.push('saying no to explicitly — the auditor will raise them otherwise.');
+      return out(lines.join('\n'), false);
+    }
+
+    if (sub === 'show') {
+      const rec = adversary.read(positional[2] || 'plan');
+      return out(rec ? (json ? rec : JSON.stringify(rec, null, 2)) : 'no adversarial pass recorded for the current bundle', Boolean(rec) && json);
+    }
+
+    throw new Error(`unknown adversary subcommand "${sub}" — try: brief, record, show, schema`);
+  },
+
+  /**
    * Write or show the handoff that survives a context clear.
    *
    * duet cannot clear context -- /clear is user-initiated and no hook triggers
@@ -386,6 +445,32 @@ const COMMANDS = {
           : `${key} was not overridden; the shipped default (${JSON.stringify(effective)}) already applies`,
         false,
       );
+    }
+
+    if (sub === 'set') {
+      /**
+       * Entering the build phase is the first of the two boundaries worth a
+       * deliberate context reset: the plan is agreed and the audit argument
+       * does not need carrying. Checked rather than suggested, because over a
+       * 13,314-turn session the documented version of this was called zero
+       * times.
+       */
+      const target0 = positional[2];
+      const cfg0 = config.load();
+      if (target0 === 'building' && cfg0.handoff?.requireAtBoundaries !== false) {
+        const handoff = require('../lib/handoff.js');
+        if (!handoff.writtenForCycle()) {
+          process.exitCode = 3;
+          throw new Error(
+            'duet: write the handoff before building starts.\n' +
+            '  The plan is agreed and the audit argument does not need carrying into\n' +
+            '  execution. Record what the next stretch needs, so a reset here costs\n' +
+            '  nothing — attended via /clear, or unattended when compaction fires:\n' +
+            '    duet handoff write --next "<what to do first, and what not to re-open>"\n' +
+            '  Turn this off with: duet config set handoff.requireAtBoundaries false',
+          );
+        }
+      }
     }
 
     if (sub === 'set') {

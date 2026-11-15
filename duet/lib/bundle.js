@@ -437,7 +437,47 @@ function renderFor(bundle, { ticket = null, index = null } = {}) {
   return lines.join('\n');
 }
 
+/**
+ * Is this cycle a feature or a fix?
+ *
+ * duet had no notion of size, so a two-line fix bought the same apparatus as a
+ * protocol redesign: an adversarial pass, a plan audit, a worker dispatch and a
+ * pre-merge review. The dispatch rule was the worst of it -- "delegate rather
+ * than doing it yourself" is sound when the work is big, because an edit you
+ * make stays in your context and is re-read every turn after. But a worker is
+ * not free: it pays its own system prompt and the project's CLAUDE.md tree,
+ * measured at ~53,000 tokens on one real setup. Dispatching only wins when
+ * `edit size x turns remaining` beats that. A three-line edit is ~100 tokens;
+ * with fifty turns left that is 5k inline against 53k delegated, so the guard
+ * was forcing the option that cost ten times more.
+ *
+ * The test is the bundle's own shape rather than a flag, because a flag is
+ * something an agent under pressure reaches for by default, and rather than the
+ * diff, because the diff is not knowable before the work it would gate.
+ *
+ * Unknown counts as `large`: the failure modes are asymmetric, and too much
+ * review is recoverable where too little is not.
+ */
+function scaleOf(bundle, cfg) {
+  const content = bundle && bundle.content;
+  if (!content) return 'large';
+
+  const plan = content.plan;
+  const hasPlanDocument = Boolean(plan && (
+    (Array.isArray(plan.steps) && plan.steps.length > 0)
+    || (typeof plan.document === 'string' && plan.document.trim())
+    || (typeof plan.path === 'string' && plan.path.trim())
+  ));
+
+  const configured = cfg && cfg.scale && cfg.scale.smallMaxTickets;
+  const maxTickets = Number.isFinite(configured) && configured >= 0 ? configured : 1;
+  const tickets = Array.isArray(content.tickets) ? content.tickets.length : 0;
+
+  return (!hasPlanDocument && tickets <= maxTickets) ? 'small' : 'large';
+}
+
 module.exports = {
+  scaleOf,
   RENDER_NOTE_LIMIT,
   renderFor,
   SCHEMA_VERSION,

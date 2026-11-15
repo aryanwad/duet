@@ -228,7 +228,9 @@ async function run({
    * always be available — but it has to be deliberate.
    */
   const scope = rounds.scopeFor(checkpoint, task);
-  const round = rounds.check(scope, { bundleKey: auditKey(checkpoint, bundle, cwd), cwd, cfg });
+  const scale = bundles.scaleOf(bundle, cfg);
+  const round = rounds.check(scope, { bundleKey: auditKey(checkpoint, bundle, cwd), cwd, cfg, scale });
+
   if (!round.ok && !force) {
     return {
       skipped: true,
@@ -242,6 +244,49 @@ async function run({
 
   const pre = codex.preflight();
   if (!pre.ok) return { skipped: true, reason: pre.problems.join('; '), problems: pre.problems };
+
+  /**
+   * The first auditor call at a checkpoint waits for the cheap pass.
+   *
+   * Only the first: later rounds are responding to real findings and must not
+   * be delayed. `force` skips it, as it skips the round cap -- a deliberate
+   * human override stays a deliberate human override.
+   *
+   * Placed AFTER the codex preflight on purpose. If the auditor cannot run at
+   * all, that is the thing to report; sending someone to do an adversarial
+   * pass first would end in the same failure, having wasted the pass.
+   */
+  /**
+   * Only a feature buys the independent pass.
+   *
+   * The adversary earns its session on a design: thirteen auditor rounds once
+   * went on failure modes discovered one per round. On a fix the surface is
+   * small enough that the worker's own edge-case sweep covers the ordinary
+   * cases, and the cross-family reviewer -- which does not share Claude's
+   * priors, where the adversary does -- is the check worth keeping.
+   */
+  if (round.ok && (round.used || 0) === 0 && !force
+      && scale === 'large'
+      && cfg?.adversary?.requireBeforeFirstAudit !== false) {
+    const adversary = require('./adversary.js');
+    if (!adversary.doneFor(checkpoint, cwd)) {
+      return {
+        skipped: true,
+        needsAdversary: true,
+        checkpoint,
+        reason:
+          `run the adversarial pass before the first ${checkpoint} audit.\n` +
+          '  One cheap model looking for what breaks, once, beats an expensive one\n' +
+          '  finding them one per round: a real cycle spent 13 auditor calls and an\n' +
+          '  hour discovering failure modes serially.\n' +
+          `    duet adversary brief ${checkpoint}      # dispatch to duet-adversary\n` +
+          '    duet adversary record --file <its json>\n' +
+          '  Then answer them in the draft and audit.\n' +
+          '  Skip deliberately with --force, or turn it off:\n' +
+          '    duet config set adversary.requireBeforeFirstAudit false',
+      };
+    }
+  }
 
   if (!force) {
     const gate = quota.canAudit(checkpoint, now, cfg);
