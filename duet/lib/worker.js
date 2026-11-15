@@ -47,7 +47,7 @@ How to work:
   what you changed: empty, zero, one, maximum; the operation arriving twice,
   out of order, or interleaved; the call that fails halfway and leaves state
   behind; the unstated opposite of each assumption you made. Handle what
-  belongs to this ticket, and list anything you chose not to handle in `unsure`
+  belongs to this ticket, and list anything you chose not to handle in \`unsure\`
   with the reason. You are the author, so this sweep does not replace the
   reviewer who did not write it -- it means that reviewer's first look lands on
   code that already handles the ordinary cases.`;
