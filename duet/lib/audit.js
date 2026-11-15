@@ -4,6 +4,11 @@ const path = require('node:path');
 const config = require('./config.js');
 const quota = require('./quota.js');
 const codex = require('./codex.js');
+
+/** Codex unless the config names the anthropic family (lazy, so a Codex-only setup never loads the other runner). */
+function auditorRunner(cfg) {
+  return cfg?.auditor?.family === 'anthropic' ? require('./claude-auditor.js') : codex;
+}
 const bundles = require('./bundle.js');
 const gate = require('./gate.js');
 const redirect = require('./redirect.js');
@@ -241,7 +246,9 @@ async function run({
     };
   }
 
-  const pre = codex.preflight();
+  /** The auditor's runner: `auditor.family: "anthropic"` = a headless Claude turn (claude-auditor.js), anything else Codex. One contract. */
+  const runner = auditorRunner(cfg);
+  const pre = runner.preflight();
   if (!pre.ok) return { skipped: true, reason: pre.problems.join('; '), problems: pre.problems };
 
   /**
@@ -283,7 +290,7 @@ async function run({
   }
 
   const prompt = buildPrompt(bundle, checkpoint, extra);
-  const result = await codex.run({
+  const result = await runner.run({
     prompt,
     model: cfg.auditor.model,
     effort: cfg.auditor.effort,
@@ -300,7 +307,7 @@ async function run({
     return {
       skipped: false,
       ok: false,
-      reason: result.timedOut ? 'auditor timed out' : (result.stderr || `codex exited ${result.code}`),
+      reason: result.timedOut ? 'auditor timed out' : (result.stderr || `${runner === codex ? 'codex' : 'claude'} exited ${result.code}`),
       bundleId: bundle.id,
     };
   }
@@ -456,4 +463,4 @@ async function run({
   };
 }
 
-module.exports = { CHECKPOINTS, CODE_CHECKPOINTS, auditKey, OUTPUT_CONTRACT, buildPrompt, parseVerdict, auditsDir, run };
+module.exports = { CHECKPOINTS, CODE_CHECKPOINTS, auditKey, OUTPUT_CONTRACT, buildPrompt, parseVerdict, auditsDir, run, _auditorRunnerForTests: auditorRunner };
